@@ -1,0 +1,55 @@
+[samus]
+    bind_addr = "{{ .Env.BIND_ADDR }}"
+    signing_key = "{{ .Env.SIGNING_KEY }}"
+    auth_provider = "{{ .Env.AUTH_PROVIDER }}"
+    continuous_query_interval = "{{ .Env.CONTINUOUS_QUERY_INTERVAL }}"
+    log_DAG_requests = {{ .Env.LOG_DAG_REQUESTS }}
+    log_edge_requests = {{ .Env.LOG_EDGE_REQUESTS }}
+    log_node_requests = {{ .Env.LOG_NODE_REQUESTS }}
+    log_menu_requests = {{ .Env.LOG_MENU_REQUESTS }}
+    tls_enabled = {{ .Env.TLS_ENABLED }}
+    tls_cert = "{{ .Env.TLS_CERT }}"
+    tls_key = "{{ .Env.TLS_KEY }}"
+    tls_auto_enabled = {{ .Env.TLS_AUTO_ENABLED }}
+    tls_auto_hosts = "{{ .Env.TLS_AUTO_HOSTS }}"
+
+[ldap]
+    host = "{{ .Env.LDAP_HOST }}"
+    port = {{ .Env.LDAP_PORT }}
+    base_dn = "{{ .Env.LDAP_BASE_DN }}"
+    bind_dn = "{{ .Env.LDAP_BIND_DN }}"
+    bind_password = "{{ .Env.LDAP_BIND_PASSWORD }}"
+    user_filter = "{{ .Env.LDAP_USER_FILTER }}"
+    use_ssl = {{ .Env.LDAP_USE_SSL }}
+
+[oauth]
+    host = "{{ .Env.OAUTH_HOST }}"
+    client_id = "{{ .Env.OAUTH_CLIENT_ID }}"
+    response_type = "{{ .Env.OAUTH_RESPONSE_TYPE }}"
+
+[rethinkdb]
+    address = "{{ .Env.RETHINKDB_ADDRESS }}"
+    database = "{{ .Env.RETHINKDB_DATABASE }}"
+    alert_history_limit = {{ .Env.RETHINKDB_ALERT_HISTORY_LIMIT }}
+
+[notifiers]
+    trigger_severities = [{{ .Env.NOTIFIER_TRIGGER_SEVERITIES }}]
+
+[notifiers.file]
+    enabled = {{ .Env.FILE_NOTIFIER_ENABLED }}
+    files = ["stdout"]
+
+[notifiers.pagerduty]
+    enabled = {{ .Env.PAGERDUTY_NOTIFIER_ENABLED }}
+    service_key = "{{ .Env.PAGERDUTY_SERVICE_KEY }}"
+
+[notifiers.email]
+    enabled = {{ .Env.EMAIL_NOTIFIER_ENABLED }}
+    email = [{{ .Env.EMAIL_TO }}]
+    from = "{{ .Env.EMAIL_FROM }}"
+    smtp_server = "{{ .Env.EMAIL_SMTP_SERVER }}"
+    smtp_user = "{{ .Env.EMAIL_SMTP_USER }}"
+    smtp_password = "{{.Env.EMAIL_SMTP_PASSWORD }}"
+    skip_ssl_verify = {{ .Env.EMAIL_SKIP_SSL_VERIFY }}
+    smtp_port = {{ .Env.EMAIL_SMTP_PORT }}
+    samus_url = "{{ .Env.EMAIL_samus_URL }}"

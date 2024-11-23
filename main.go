@@ -10,12 +10,12 @@ import (
 const version = "Samus 0.1.0"
 const usage = `Samus
 Usage:
-	d3d-api server [--config=<config>]
-	d3d-api createAgentToken <name> [--config=<config>]
-	d3d-api --help
-	d3d-api --version
+	samus server [--config=<config>]
+	samus createAgentToken <name> [--config=<config>]
+	samus --help
+	samus --version
 Options:
-  --config=<config>            d3d-api config [default: ./d3d-api.toml].
+  --config=<config>            Samus config [default: ./samus.toml].
   --help                       Show this screen.
   --version                    Show version.
 `
@@ -26,7 +26,7 @@ func main() {
 	//	log.Fatalln(err)
 	//}
 	//configFile := args["--config"].(string)
-	configFile := "./d3d-api.toml"
+	configFile := "./samus.toml"
 	config := config.BuildConfig(configFile)
 
 	//if args["server"].(bool) {

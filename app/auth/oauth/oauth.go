@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
@@ -70,7 +70,7 @@ func (op *OAuthAuthProvider) Authenticate(username, password string) (authentica
 		token = tk.CreateExpiringToken(username, op.signingKey, time.Hour*48, "oauth")
 		return
 	} else {
-		message, _ := ioutil.ReadAll(resp.Body)
+		message, _ := io.ReadAll(resp.Body)
 		OAuthFailed(errors.New(fmt.Sprintf("response code: %d message: %s", resp.StatusCode, message)))
 		return
 	}

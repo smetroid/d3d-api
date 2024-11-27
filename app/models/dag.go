@@ -20,9 +20,9 @@ type Dag struct {
 	Diagram string `gorethink:"diagram" json:"diagram"`
 
 	//UTC date and time the diagram was generated in ISO 8601 format
-	CreateTime time.Time `gorethink:"createTime" json:"createTime"`
+	Created time.Time `gorethink:"created" json:"created"`
 
-	UpdatedTime time.Time `gorethink:"updatedTime" json:"updatedTime"`
+	Updated time.Time `gorethink:"updated" json:"updated"`
 }
 
 type DAGResponse struct {
@@ -69,7 +69,7 @@ func (dag *Dag) GenerateDefaults() {
 		dag.Id = id.String()
 	}
 
-	if dag.CreateTime.IsZero() {
-		dag.CreateTime = time.Now()
+	if dag.Created.IsZero() {
+		dag.Created = time.Now()
 	}
 }

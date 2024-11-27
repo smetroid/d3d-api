@@ -10,10 +10,10 @@ type Edge struct {
 	//globally unique random UUID
 	Id string `gorethink:"id,opmitempty" json:"id"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	CreateTime time.Time         `gorethink:"createTime" json:"createTime"`
-	V          string            `gorethink:"v" json:"v"`
-	W          string            `gorethink:"w" json:"w"`
-	Label      map[string]string `gorethink:"label" json:"value.label"`
+	Created time.Time         `gorethink:"created" json:"created"`
+	V       string            `gorethink:"v" json:"v"`
+	W       string            `gorethink:"w" json:"w"`
+	Label   map[string]string `gorethink:"label" json:"value.label"`
 }
 
 type EdgeResponse struct {
@@ -53,7 +53,7 @@ func (edge *Edge) GenerateDefaults() {
 		edge.Id = id.String()
 	}
 
-	if edge.CreateTime.IsZero() {
-		edge.CreateTime = time.Now()
+	if edge.Created.IsZero() {
+		edge.Created = time.Now()
 	}
 }

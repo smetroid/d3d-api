@@ -18,7 +18,7 @@ type Node struct {
 	ValueClusterLabelPos string            `gorethink:"clusterLabelPos json:"value.clusterlabelpos"`
 	ValueStyle           string            `gorethink:"clusterStyle json:"value.style"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	CreateTime time.Time `gorethink:"createTime" json:"createTime"`
+	Created time.Time `gorethink:"created" json:"created"`
 }
 
 type NodeResponse struct {
@@ -58,7 +58,7 @@ func (node *Node) GenerateDefaults() {
 		node.Id = id.String()
 	}
 
-	if node.CreateTime.IsZero() {
-		node.CreateTime = time.Now()
+	if node.Created.IsZero() {
+		node.Created = time.Now()
 	}
 }

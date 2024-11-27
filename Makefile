@@ -35,16 +35,3 @@ kill-debug:
 	$(eval DLV:=$(shell cat /tmp/dlv.id 2>&1 /dev/null ))
 	@if [ -z ${DLV} ];then kill -9 $(DLV); else echo "dlv.Id not found"; fi
 
-
-createAndStartContainer:
-	docker run --name rethinkdb -p 8080:8080 -p 28015:28015 -v "${PWD}:/data" -d rethinkdb
-
-removeContainer:
-	docker rm ${NAME}
-
-startContainer:
-	docker start ${NAME}
-
-stopContainer:
-	docker stop ${NAME}
-

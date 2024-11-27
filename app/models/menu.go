@@ -10,10 +10,10 @@ type Menu struct {
 	//globally unique random UUID
 	Id string `gorethink:"id,opmitempty" json:"id"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	CreateTime time.Time `gorethink:"createTime" json:"createTime"`
-	Name       string    `gorethink:"name" json:"name"`
-	Parent     string    `gorethink:"parent" json:"parent"`
-	Options    string    `gorethink:"options" json:"options"`
+	Created time.Time `gorethink:"created" json:"created"`
+	Name    string    `gorethink:"name" json:"name"`
+	Parent  string    `gorethink:"parent" json:"parent"`
+	Options string    `gorethink:"options" json:"options"`
 }
 
 type MenuResponse struct {
@@ -74,7 +74,7 @@ func (menu *Menu) GenerateDefaults() {
 		menu.Id = id.String()
 	}
 
-	if menu.CreateTime.IsZero() {
-		menu.CreateTime = time.Now()
+	if menu.Created.IsZero() {
+		menu.Created = time.Now()
 	}
 }

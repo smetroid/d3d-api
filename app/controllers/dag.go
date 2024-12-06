@@ -42,7 +42,6 @@ func (dc *DAGsController) createDAG(ctx echo.Context) error {
 	}
 
 	dagsResponse, err := dc.DAGService.ProcessDAG(incomingDag)
-
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
 	}

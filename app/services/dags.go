@@ -45,7 +45,7 @@ func (ds *DAGService) ProcessDAG(currentDAG models.Dag) (id string, err error) {
 		return
 	}
 
-	log.Println(existingDAG)
+	id = existingDAG.Id
 
 	return
 }

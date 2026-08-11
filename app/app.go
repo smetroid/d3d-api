@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth"
 	"github.com/smetroid/d3d-api/app/auth/middleware"
+	"github.com/smetroid/d3d-api/app/collab"
 	"github.com/smetroid/d3d-api/app/config"
 	"github.com/smetroid/d3d-api/app/controllers"
 	"github.com/smetroid/d3d-api/app/services"
@@ -61,8 +62,8 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	authProvider := BuildAuthProvider(config)
 	authMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		SigningKey:  []byte(config.Samus.SigningKey),
-		TokenLookup: "header:Authorization,query:api-key",
+		SigningKey:   []byte(config.Samus.SigningKey),
+		TokenLookup: "header:Authorization,query:api-key,query:token",
 	})
 
 	authController := controllers.AuthController{
@@ -87,9 +88,12 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		DB: &db,
 	}
 
+	hub := collab.NewHub()
+
 	dagController := controllers.DAGsController{
 		Echo:           e,
 		DAGService:     dagService,
+		Hub:            hub,
 		AuthMiddleware: authMiddleware,
 		LogDAGRequests: config.Samus.LogDAGRequests,
 	}

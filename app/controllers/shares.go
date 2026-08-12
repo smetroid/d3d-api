@@ -1,15 +1,16 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth/token"
 	"github.com/smetroid/d3d-api/app/db/rethinkdb"
 	"github.com/smetroid/d3d-api/app/models"
-	jwt "github.com/dgrijalva/jwt-go"
 )
 
 type SharesController struct {
@@ -20,6 +21,7 @@ type SharesController struct {
 }
 
 func (sc *SharesController) Init() {
+	sc.Echo.GET("/shares/exchange", sc.exchangeShare) // no auth — public endpoint
 	sc.Echo.POST("/dag/:dag/shares", sc.createShare, sc.AuthMiddleware)
 	sc.Echo.POST("/dag/:dag/shares/:jti/revoke", sc.revokeShare, sc.AuthMiddleware)
 }
@@ -81,4 +83,50 @@ func (sc *SharesController) revokeShare(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
 	}
 	return ctx.JSON(http.StatusOK, models.OK_RESPONSE)
+}
+
+func (sc *SharesController) exchangeShare(ctx echo.Context) error {
+	raw := ctx.QueryParam("token")
+	if raw == "" {
+		return ctx.JSON(http.StatusBadRequest, models.ErrorResponse("missing token"))
+	}
+
+	tok, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(sc.SigningKey), nil
+	})
+	if err != nil || !tok.Valid {
+		return ctx.JSON(http.StatusUnauthorized, models.ErrorResponse("invalid or expired token"))
+	}
+
+	claims, ok := tok.Claims.(jwt.MapClaims)
+	if !ok {
+		return ctx.JSON(http.StatusUnauthorized, models.ErrorResponse("invalid claims"))
+	}
+
+	iss, _ := claims["iss"].(string)
+	if iss != "d3d-share" {
+		return ctx.JSON(http.StatusUnauthorized, models.ErrorResponse("not a share token"))
+	}
+
+	jti, _ := claims["jti"].(string)
+	dagId, _ := claims["dag_id"].(string)
+	role, _ := claims["role"].(string)
+
+	revoked, err := sc.DB.IsRevoked(jti)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+	}
+	if revoked {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("share link revoked"))
+	}
+
+	return ctx.JSON(http.StatusOK, models.ExchangeShareResponse{
+		Status: "ok",
+		DagId:  dagId,
+		Role:   role,
+		Jti:    jti,
+	})
 }

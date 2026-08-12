@@ -28,3 +28,10 @@ type CreateShareResponse struct {
 	Jti    string `json:"jti"`
 	Role   string `json:"role"`
 }
+
+type ExchangeShareResponse struct {
+	Status string `json:"status"`
+	DagId  string `json:"dagId"`
+	Role   string `json:"role"`
+	Jti    string `json:"jti"`
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/collab"
+	"github.com/smetroid/d3d-api/app/db/rethinkdb"
 	"github.com/smetroid/d3d-api/app/models"
 	"github.com/smetroid/d3d-api/app/services"
 )
@@ -21,6 +22,7 @@ type DAGsController struct {
 	Echo           *echo.Echo
 	DAGService     services.DAGService
 	Hub            *collab.Hub
+	DB             *rethinkdb.RethinkDB
 	AuthMiddleware echo.MiddlewareFunc
 	LogDAGRequests bool
 }
@@ -87,6 +89,11 @@ func (dc *DAGsController) StandardResponse(ctx echo.Context, response interface{
 }
 
 func (dc *DAGsController) updateDAG(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	var dagUpdate models.Dag
 
 	if dc.LogDAGRequests {
@@ -128,6 +135,14 @@ func (dc *DAGsController) updateDAG(ctx echo.Context) error {
 // adds the client to the collab hub for the requested diagram room.
 func (dc *DAGsController) dagWS(ctx echo.Context) error {
 	dagId := ctx.Param("dag")
+
+	// Reject revoked share tokens before upgrading.
+	if jti, _, isShare := shareInfoFromCtx(ctx); isShare && dc.DB != nil {
+		revoked, err := dc.DB.IsRevoked(jti)
+		if err != nil || revoked {
+			return ctx.JSON(http.StatusForbidden, models.ErrorResponse("share link revoked"))
+		}
+	}
 
 	conn, err := wsUpgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
@@ -188,6 +203,26 @@ func (dc *DAGsController) restoreDAGHistory(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, models.OK_RESPONSE)
+}
+
+// shareInfoFromCtx returns jti/role from a share token; isShare is false for regular auth tokens.
+func shareInfoFromCtx(ctx echo.Context) (jti, role string, isShare bool) {
+	u, ok := ctx.Get("user").(*jwt.Token)
+	if !ok || u == nil {
+		return
+	}
+	claims, ok := u.Claims.(jwt.MapClaims)
+	if !ok {
+		return
+	}
+	iss, _ := claims["iss"].(string)
+	if iss != "d3d-share" {
+		return
+	}
+	jti, _ = claims["jti"].(string)
+	role, _ = claims["role"].(string)
+	isShare = true
+	return
 }
 
 // usernameFromCtx extracts the "jti" claim (username) from the JWT stored

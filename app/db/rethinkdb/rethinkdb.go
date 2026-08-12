@@ -56,6 +56,10 @@ func (re *RethinkDB) connect() error {
 		return err
 	}
 
+	if err = re.InitSharesTables(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -555,6 +559,37 @@ func (re *RethinkDB) GetMenusOptions(queryArgs map[string][]string) (menusOption
 	//log.Println(menusOptions)
 
 	return
+}
+
+// ─── Shares ───────────────────────────────────────────────────────────────────
+
+func (re *RethinkDB) InitSharesTables() error {
+	for _, table := range []string{"shares", "share_denylist"} {
+		if err := re.createTableIfNotExist(table); err != nil {
+			return err
+		}
+	}
+	return re.createIndexIfNotExist("shares", "dag_id")
+}
+
+func (re *RethinkDB) CreateShare(s models.Share) error {
+	_, err := r.DB(re.Database).Table("shares").Insert(s).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) RevokeShare(jti string) error {
+	entry := models.ShareDenylist{Jti: jti, RevokedAt: time.Now()}
+	_, err := r.DB(re.Database).Table("share_denylist").Insert(entry, r.InsertOpts{Conflict: "replace"}).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) IsRevoked(jti string) (bool, error) {
+	res, err := r.DB(re.Database).Table("share_denylist").Get(jti).Run(re.session)
+	if err != nil {
+		return false, err
+	}
+	defer res.Close()
+	return !res.IsNil(), nil
 }
 
 // ─── Users (local auth) ───────────────────────────────────────────────────────

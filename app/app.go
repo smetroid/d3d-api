@@ -95,6 +95,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		Echo:           e,
 		DAGService:     dagService,
 		Hub:            hub,
+		DB:             &db,
 		AuthMiddleware: authMiddleware,
 		LogDAGRequests: config.Samus.LogDAGRequests,
 	}
@@ -120,10 +121,18 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		LogMenuRequests: config.Samus.LogMenuRequests,
 	}
 
+	sharesController := controllers.SharesController{
+		Echo:           e,
+		DB:             &db,
+		SigningKey:      config.Samus.SigningKey,
+		AuthMiddleware: authMiddleware,
+	}
+
 	dagController.Init()
 	edgeController.Init()
 	nodeController.Init()
 	menuController.Init()
+	sharesController.Init()
 
 	// Route => handler
 	/*

@@ -569,7 +569,23 @@ func (re *RethinkDB) InitSharesTables() error {
 			return err
 		}
 	}
-	return re.createIndexIfNotExist("shares", "dag_id")
+	if err := re.createIndexIfNotExist("shares", "dag_id"); err != nil {
+		return err
+	}
+	return re.createIndexIfNotExist("shares", "jti")
+}
+
+func (re *RethinkDB) GetShareByJti(jti string) (models.Share, error) {
+	res, err := r.DB(re.Database).Table("shares").GetAllByIndex("jti", jti).Run(re.session)
+	if err != nil {
+		return models.Share{}, err
+	}
+	defer res.Close()
+	var s models.Share
+	if err = res.One(&s); err != nil {
+		return models.Share{}, err
+	}
+	return s, nil
 }
 
 func (re *RethinkDB) CreateShare(s models.Share) error {

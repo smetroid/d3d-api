@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -12,6 +13,24 @@ import (
 	"github.com/smetroid/d3d-api/app/db/rethinkdb"
 	"github.com/smetroid/d3d-api/app/models"
 )
+
+var anonAdjectives = []string{
+	"Amber", "Blue", "Cyan", "Emerald", "Fuchsia",
+	"Gold", "Indigo", "Jade", "Lime", "Magenta",
+	"Navy", "Olive", "Pink", "Rose", "Ruby",
+	"Sage", "Silver", "Teal", "Violet", "Yellow",
+}
+
+var anonAnimals = []string{
+	"Bear", "Crow", "Deer", "Eagle", "Fox",
+	"Hawk", "Hare", "Ibis", "Jay", "Kite",
+	"Lynx", "Moth", "Newt", "Owl", "Pike",
+	"Quail", "Raven", "Seal", "Toad", "Vole",
+}
+
+func randomAnonName() string {
+	return anonAdjectives[rand.Intn(len(anonAdjectives))] + " " + anonAnimals[rand.Intn(len(anonAnimals))]
+}
 
 type SharesController struct {
 	Echo           *echo.Echo
@@ -61,6 +80,7 @@ func (sc *SharesController) createShare(ctx echo.Context) error {
 		DagId:     dagId,
 		Jti:       jti,
 		Role:      req.Role,
+		AnonName:  randomAnonName(),
 		CreatedBy: usernameFromCtx(ctx),
 		ExpiresAt: exp,
 		CreatedAt: time.Now(),
@@ -123,10 +143,16 @@ func (sc *SharesController) exchangeShare(ctx echo.Context) error {
 		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("share link revoked"))
 	}
 
+	share, err := sc.DB.GetShareByJti(jti)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+	}
+
 	return ctx.JSON(http.StatusOK, models.ExchangeShareResponse{
-		Status: "ok",
-		DagId:  dagId,
-		Role:   role,
-		Jti:    jti,
+		Status:   "ok",
+		DagId:    dagId,
+		Role:     role,
+		Jti:      jti,
+		AnonName: share.AnonName,
 	})
 }

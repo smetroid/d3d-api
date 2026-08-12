@@ -7,6 +7,7 @@ type Share struct {
 	DagId     string    `gorethink:"dag_id" json:"dagId"`
 	Jti       string    `gorethink:"jti" json:"jti"`
 	Role      string    `gorethink:"role" json:"role"` // "view" | "edit"
+	AnonName  string    `gorethink:"anon_name" json:"anonName"`
 	CreatedBy string    `gorethink:"created_by" json:"createdBy"`
 	ExpiresAt time.Time `gorethink:"expires_at" json:"expiresAt"`
 	CreatedAt time.Time `gorethink:"created_at" json:"createdAt"`
@@ -30,8 +31,9 @@ type CreateShareResponse struct {
 }
 
 type ExchangeShareResponse struct {
-	Status string `json:"status"`
-	DagId  string `json:"dagId"`
-	Role   string `json:"role"`
-	Jti    string `json:"jti"`
+	Status   string `json:"status"`
+	DagId    string `json:"dagId"`
+	Role     string `json:"role"`
+	Jti      string `json:"jti"`
+	AnonName string `json:"anonName"`
 }

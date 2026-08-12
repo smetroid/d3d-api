@@ -26,3 +26,4 @@ go.work.sum
 
 # ignore config file
 samus.toml
+samus_dev.toml

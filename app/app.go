@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth"
+	"github.com/smetroid/d3d-api/app/auth/localauth"
 	"github.com/smetroid/d3d-api/app/auth/middleware"
 	"github.com/smetroid/d3d-api/app/collab"
 	"github.com/smetroid/d3d-api/app/config"
@@ -159,6 +160,8 @@ func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvide
 		authProvider = &config.Ldap
 	case "oauth":
 		authProvider = &config.OAuth
+	case "localauth":
+		authProvider = &localauth.LocalAuthProvider{DB: &config.Rethinkdb}
 	}
 
 	err := authProvider.Connect()

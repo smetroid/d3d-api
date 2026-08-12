@@ -557,6 +557,34 @@ func (re *RethinkDB) GetMenusOptions(queryArgs map[string][]string) (menusOption
 	return
 }
 
+// ─── Users (local auth) ───────────────────────────────────────────────────────
+
+func (re *RethinkDB) InitUsersTable() error {
+	if err := re.createTableIfNotExist("users"); err != nil {
+		return err
+	}
+	return re.createIndexIfNotExist("users", "username")
+}
+
+func (re *RethinkDB) CreateUser(u models.User) error {
+	_, err := r.DB(re.Database).Table("users").Insert(u).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) GetUser(username string) (models.User, error) {
+	res, err := r.DB(re.Database).Table("users").
+		GetAllByIndex("username", username).
+		Limit(1).
+		Run(re.session)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer res.Close()
+	var u models.User
+	res.One(&u)
+	return u, nil
+}
+
 // ─── Index helpers ────────────────────────────────────────────────────────────
 
 func (re *RethinkDB) createIndexIfNotExist(table, index string) error {

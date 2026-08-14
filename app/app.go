@@ -7,7 +7,9 @@ import (
 
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth"
+	"github.com/smetroid/d3d-api/app/auth/localauth"
 	"github.com/smetroid/d3d-api/app/auth/middleware"
+	"github.com/smetroid/d3d-api/app/collab"
 	"github.com/smetroid/d3d-api/app/config"
 	"github.com/smetroid/d3d-api/app/controllers"
 	"github.com/smetroid/d3d-api/app/services"
@@ -61,8 +63,8 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	authProvider := BuildAuthProvider(config)
 	authMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		SigningKey:  []byte(config.Samus.SigningKey),
-		TokenLookup: "header:Authorization,query:api-key",
+		SigningKey:   []byte(config.Samus.SigningKey),
+		TokenLookup: "header:Authorization,query:api-key,query:token",
 	})
 
 	authController := controllers.AuthController{
@@ -87,9 +89,13 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		DB: &db,
 	}
 
+	hub := collab.NewHub()
+
 	dagController := controllers.DAGsController{
 		Echo:           e,
 		DAGService:     dagService,
+		Hub:            hub,
+		DB:             &db,
 		AuthMiddleware: authMiddleware,
 		LogDAGRequests: config.Samus.LogDAGRequests,
 	}
@@ -115,10 +121,18 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		LogMenuRequests: config.Samus.LogMenuRequests,
 	}
 
+	sharesController := controllers.SharesController{
+		Echo:           e,
+		DB:             &db,
+		SigningKey:      config.Samus.SigningKey,
+		AuthMiddleware: authMiddleware,
+	}
+
 	dagController.Init()
 	edgeController.Init()
 	nodeController.Init()
 	menuController.Init()
+	sharesController.Init()
 
 	// Route => handler
 	/*
@@ -155,6 +169,8 @@ func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvide
 		authProvider = &config.Ldap
 	case "oauth":
 		authProvider = &config.OAuth
+	case "localauth":
+		authProvider = &localauth.LocalAuthProvider{DB: &config.Rethinkdb}
 	}
 
 	err := authProvider.Connect()

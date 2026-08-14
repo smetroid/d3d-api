@@ -54,3 +54,16 @@ func (ds *DAGService) UpdateDAG(id string, dag models.Dag) (err error) {
 	err = ds.DB.UpdateDAG(id, dag)
 	return
 }
+
+func (ds *DAGService) AppendHistory(dagId, snapshotJSON, savedBy string) error {
+	return ds.DB.AppendHistory(dagId, snapshotJSON, savedBy)
+}
+
+func (ds *DAGService) GetHistory(dagId string) (models.DagHistoryResponse, error) {
+	history, err := ds.DB.GetHistory(dagId)
+	return models.DagHistoryResponse{Status: "ok", History: history}, err
+}
+
+func (ds *DAGService) RestoreHistory(historyId, dagId string) error {
+	return ds.DB.RestoreHistory(historyId, dagId)
+}

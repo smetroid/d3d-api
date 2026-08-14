@@ -2,7 +2,9 @@ package rethinkdb
 
 import (
 	"log"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/smetroid/d3d-api/app/models"
 	r "gopkg.in/gorethink/gorethink.v4"
 )
@@ -41,6 +43,20 @@ func (re *RethinkDB) connect() error {
 
 	err = re.createTableIfNotExist("dags")
 	if err != nil {
+		return err
+	}
+
+	err = re.createTableIfNotExist("dag_history")
+	if err != nil {
+		return err
+	}
+
+	err = re.createIndexIfNotExist("dag_history", "dag_id")
+	if err != nil {
+		return err
+	}
+
+	if err = re.InitSharesTables(); err != nil {
 		return err
 	}
 
@@ -544,3 +560,180 @@ func (re *RethinkDB) GetMenusOptions(queryArgs map[string][]string) (menusOption
 
 	return
 }
+
+// ─── Shares ───────────────────────────────────────────────────────────────────
+
+func (re *RethinkDB) InitSharesTables() error {
+	for _, table := range []string{"shares", "share_denylist"} {
+		if err := re.createTableIfNotExist(table); err != nil {
+			return err
+		}
+	}
+	if err := re.createIndexIfNotExist("shares", "dag_id"); err != nil {
+		return err
+	}
+	return re.createIndexIfNotExist("shares", "jti")
+}
+
+func (re *RethinkDB) GetShareByJti(jti string) (models.Share, error) {
+	res, err := r.DB(re.Database).Table("shares").GetAllByIndex("jti", jti).Run(re.session)
+	if err != nil {
+		return models.Share{}, err
+	}
+	defer res.Close()
+	var s models.Share
+	if err = res.One(&s); err != nil {
+		return models.Share{}, err
+	}
+	return s, nil
+}
+
+func (re *RethinkDB) CreateShare(s models.Share) error {
+	_, err := r.DB(re.Database).Table("shares").Insert(s).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) RevokeShare(jti string) error {
+	entry := models.ShareDenylist{Jti: jti, RevokedAt: time.Now()}
+	_, err := r.DB(re.Database).Table("share_denylist").Insert(entry, r.InsertOpts{Conflict: "replace"}).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) IsRevoked(jti string) (bool, error) {
+	res, err := r.DB(re.Database).Table("share_denylist").Get(jti).Run(re.session)
+	if err != nil {
+		return false, err
+	}
+	defer res.Close()
+	return !res.IsNil(), nil
+}
+
+// ─── Users (local auth) ───────────────────────────────────────────────────────
+
+func (re *RethinkDB) InitUsersTable() error {
+	if err := re.createTableIfNotExist("users"); err != nil {
+		return err
+	}
+	return re.createIndexIfNotExist("users", "username")
+}
+
+func (re *RethinkDB) CreateUser(u models.User) error {
+	_, err := r.DB(re.Database).Table("users").Insert(u).RunWrite(re.session)
+	return err
+}
+
+func (re *RethinkDB) GetUser(username string) (models.User, error) {
+	res, err := r.DB(re.Database).Table("users").
+		GetAllByIndex("username", username).
+		Limit(1).
+		Run(re.session)
+	if err != nil {
+		return models.User{}, err
+	}
+	defer res.Close()
+	var u models.User
+	res.One(&u)
+	return u, nil
+}
+
+// ─── Index helpers ────────────────────────────────────────────────────────────
+
+func (re *RethinkDB) createIndexIfNotExist(table, index string) error {
+	res, err := r.DB(re.Database).Table(table).IndexList().Run(re.session)
+	if err != nil {
+		return err
+	}
+	defer res.Close()
+	var indexes []string
+	if err = res.All(&indexes); err != nil {
+		return err
+	}
+	for _, idx := range indexes {
+		if idx == index {
+			return nil
+		}
+	}
+	_, err = r.DB(re.Database).Table(table).IndexCreate(index).RunWrite(re.session)
+	if err != nil {
+		return err
+	}
+	_, err = r.DB(re.Database).Table(table).IndexWait(index).Run(re.session)
+	return err
+}
+
+// ─── History ──────────────────────────────────────────────────────────────────
+
+const historyLimit = 50
+
+func (re *RethinkDB) AppendHistory(dagId, snapshotJSON, savedBy string) error {
+	entry := models.DagHistory{
+		Id:           uuid.New().String(),
+		DagId:        dagId,
+		SnapshotJSON: snapshotJSON,
+		SavedBy:      savedBy,
+		SavedAt:      time.Now(),
+	}
+	_, err := r.DB(re.Database).Table("dag_history").Insert(entry).RunWrite(re.session)
+	if err != nil {
+		return err
+	}
+	go re.pruneHistory(dagId)
+	return nil
+}
+
+func (re *RethinkDB) pruneHistory(dagId string) {
+	res, err := r.DB(re.Database).Table("dag_history").
+		GetAllByIndex("dag_id", dagId).
+		OrderBy(r.Asc("saved_at")).
+		Field("id").
+		Run(re.session)
+	if err != nil {
+		return
+	}
+	defer res.Close()
+	var ids []string
+	if err = res.All(&ids); err != nil || len(ids) <= historyLimit {
+		return
+	}
+	toDelete := ids[:len(ids)-historyLimit]
+	for _, id := range toDelete {
+		r.DB(re.Database).Table("dag_history").Get(id).Delete().RunWrite(re.session) //nolint:errcheck
+	}
+}
+
+func (re *RethinkDB) GetHistory(dagId string) ([]models.DagHistory, error) {
+	res, err := r.DB(re.Database).Table("dag_history").
+		GetAllByIndex("dag_id", dagId).
+		OrderBy(r.Desc("saved_at")).
+		Limit(historyLimit).
+		Run(re.session)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Close()
+	var history []models.DagHistory
+	err = res.All(&history)
+	if history == nil {
+		history = []models.DagHistory{}
+	}
+	return history, err
+}
+
+func (re *RethinkDB) RestoreHistory(historyId, dagId string) error {
+	res, err := r.DB(re.Database).Table("dag_history").Get(historyId).Run(re.session)
+	if err != nil {
+		return err
+	}
+	defer res.Close()
+	var entry models.DagHistory
+	if err = res.One(&entry); err != nil {
+		return err
+	}
+	restore := models.Dag{
+		Id:      dagId,
+		Diagram: entry.SnapshotJSON,
+	}
+	return re.UpdateDAG(dagId, restore)
+}
+
+

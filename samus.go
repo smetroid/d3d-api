@@ -1,66 +1,63 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/smetroid/d3d-api/app"
 	"github.com/smetroid/d3d-api/app/config"
+	"github.com/smetroid/d3d-api/app/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
-const version = "Samus 0.1.0"
-const usage = `Samus
-Usage:
-	samus server [--config=<config>]
-	samus createAgentToken <name> [--config=<config>]
-	samus --help
-	samus --version
-Options:
-  --config=<config>            Samus config [default: ./samus.toml].
-  --help                       Show this screen.
-  --version                    Show version.
-`
-
 func main() {
-	//args, err := docopt.Parse(usage, nil, true, version, false)
-	//if err != nil {
-	//	log.Fatalln(err)
-	//}
-	//configFile := args["--config"].(string)
 	configFile := "./samus.toml"
-	config := config.BuildConfig(configFile)
+	if len(os.Args) >= 2 && os.Args[1] == "--config" && len(os.Args) >= 3 {
+		configFile = os.Args[2]
+	}
 
-	//if args["server"].(bool) {
-	echo := app.BuildApp(config)
-	//echo.Use(middleware.Recover())
-	log.Println("Starting samus server...")
-	//e := echo.New()
-	//echo.Use(middleware.Recover())
-	//e.Logger().Fatal(e.Run(fasthttp.New(":3001")))
-	echo.Start(config.Samus.BindAddr)
-
-	//var err error
-
-	/*
-		if config.Samus.TLSEnabled {
-			if config.Samus.TLSAutoEnabled {
-				err = echo.StartAutoTLS(config.Samus.BindAddr)
-			} else {
-				err = echo.StartTLS(config.Samus.BindAddr, config.Samus.TLSCert, config.Samus.TLSKey)
-			}
-		} else {
-			err = echo.Start(config.Samus.BindAddr)
+	// createUser <username> <password> [--config=<file>]
+	if len(os.Args) >= 2 && os.Args[1] == "createUser" {
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "usage: samus createUser <username> <password>")
+			os.Exit(1)
+		}
+		username := os.Args[2]
+		password := os.Args[3]
+		if len(os.Args) >= 6 && os.Args[4] == "--config" {
+			configFile = os.Args[5]
 		}
 
+		cfg := config.BuildConfig(configFile)
+		if err := cfg.Rethinkdb.Init(); err != nil {
+			log.Fatal("rethinkdb init:", err)
+		}
+		if err := cfg.Rethinkdb.InitUsersTable(); err != nil {
+			log.Fatal("users table init:", err)
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-			echo.Logger.Fatal(err)
+			log.Fatal("bcrypt:", err)
 		}
-	*/
-
-	//}
-
-	/*
-		if args["createAgentToken"].(bool) {
-			fmt.Println(token.CreateExpirationFreeAgentToken(args["<name>"].(string), config.Samus.SigningKey))
+		user := models.User{
+			Id:           uuid.New().String(),
+			Username:     username,
+			PasswordHash: string(hash),
+			CreatedAt:    time.Now(),
 		}
-	*/
+		if err := cfg.Rethinkdb.CreateUser(user); err != nil {
+			log.Fatal("create user:", err)
+		}
+		fmt.Printf("user %q created\n", username)
+		return
+	}
+
+	cfg := config.BuildConfig(configFile)
+	echo := app.BuildApp(cfg)
+	log.Println("Starting samus server...")
+	echo.Start(cfg.Samus.BindAddr)
 }

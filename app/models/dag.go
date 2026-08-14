@@ -23,6 +23,22 @@ type Dag struct {
 	Created time.Time `gorethink:"created" json:"created"`
 
 	Updated time.Time `gorethink:"updated" json:"updated"`
+
+	// ClientId is used for WS echo prevention — not persisted to DB.
+	ClientId string `gorethink:"-" json:"clientId,omitempty"`
+}
+
+type DagHistory struct {
+	Id           string    `gorethink:"id" json:"id"`
+	DagId        string    `gorethink:"dag_id" json:"dagId"`
+	SnapshotJSON string    `gorethink:"snapshot_json" json:"snapshotJson"`
+	SavedBy      string    `gorethink:"saved_by" json:"savedBy"`
+	SavedAt      time.Time `gorethink:"saved_at" json:"savedAt"`
+}
+
+type DagHistoryResponse struct {
+	Status  string       `json:"status"`
+	History []DagHistory `json:"history"`
 }
 
 type DAGResponse struct {

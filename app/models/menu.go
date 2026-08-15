@@ -8,12 +8,12 @@ import (
 
 type Menu struct {
 	//globally unique random UUID
-	Id string `gorethink:"id,opmitempty" json:"id"`
+	Id string `db:"id" json:"id"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	Created time.Time `gorethink:"created" json:"created"`
-	Name    string    `gorethink:"name" json:"name"`
-	Parent  string    `gorethink:"parent" json:"parent"`
-	Options string    `gorethink:"options" json:"options"`
+	Created time.Time `db:"created" json:"created"`
+	Name    string    `db:"name" json:"name"`
+	Parent  string    `db:"parent" json:"parent"`
+	Options string    `db:"options" json:"options"`
 }
 
 type MenuResponse struct {

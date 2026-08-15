@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth/token"
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
@@ -34,7 +34,7 @@ func randomAnonName() string {
 
 type SharesController struct {
 	Echo           *echo.Echo
-	DB             *rethinkdb.RethinkDB
+	DB             *postgres.Postgres
 	SigningKey      string
 	AuthMiddleware echo.MiddlewareFunc
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/collab"
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 	"github.com/smetroid/d3d-api/app/services"
 )
@@ -22,7 +22,7 @@ type DAGsController struct {
 	Echo           *echo.Echo
 	DAGService     services.DAGService
 	Hub            *collab.Hub
-	DB             *rethinkdb.RethinkDB
+	DB             *postgres.Postgres
 	AuthMiddleware echo.MiddlewareFunc
 	LogDAGRequests bool
 }

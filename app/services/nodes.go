@@ -3,12 +3,12 @@ package services
 import (
 	"log"
 
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
 type NodeService struct {
-	DB *rethinkdb.RethinkDB
+	DB *postgres.Postgres
 }
 
 func (ds *NodeService) GetNode(id string) (nodeResponse models.NodeResponse, err error) {

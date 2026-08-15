@@ -32,11 +32,8 @@ func main() {
 		}
 
 		cfg := config.BuildConfig(configFile)
-		if err := cfg.Rethinkdb.Init(); err != nil {
-			log.Fatal("rethinkdb init:", err)
-		}
-		if err := cfg.Rethinkdb.InitUsersTable(); err != nil {
-			log.Fatal("users table init:", err)
+		if err := cfg.Postgres.Init(); err != nil {
+			log.Fatal("postgres init:", err)
 		}
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -49,7 +46,7 @@ func main() {
 			PasswordHash: string(hash),
 			CreatedAt:    time.Now(),
 		}
-		if err := cfg.Rethinkdb.CreateUser(user); err != nil {
+		if err := cfg.Postgres.CreateUser(user); err != nil {
 			log.Fatal("create user:", err)
 		}
 		fmt.Printf("user %q created\n", username)

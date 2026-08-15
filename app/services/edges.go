@@ -3,12 +3,12 @@ package services
 import (
 	"log"
 
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
 type EdgeService struct {
-	DB *rethinkdb.RethinkDB
+	DB *postgres.Postgres
 }
 
 func (ds *EdgeService) GetEdge(id string) (edgeResponse models.EdgeResponse, err error) {

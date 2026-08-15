@@ -1,0 +1,635 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/smetroid/d3d-api/app/models"
+)
+
+// testDSNEnv selects the database used by the integration tests. Tests skip
+// when it is unset so `go test ./...` stays green without a local Postgres.
+const testDSNEnv = "TEST_DATABASE_URL"
+
+// newTestPostgres opens the repository on TEST_DATABASE_URL, runs migrations,
+// and truncates every table for a clean slate per test.
+func newTestPostgres(t *testing.T) *Postgres {
+	t.Helper()
+	dsn := os.Getenv(testDSNEnv)
+	if dsn == "" {
+		t.Skipf("%s not set; skipping Postgres integration tests", testDSNEnv)
+	}
+	p := &Postgres{DSN: dsn}
+	if err := p.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	t.Cleanup(func() { p.Pool().Close() })
+	truncateAll(t, p)
+	return p
+}
+
+func truncateAll(t *testing.T, p *Postgres) {
+	t.Helper()
+	_, err := p.Pool().Exec(context.Background(), `
+		TRUNCATE dag_history, shares, share_denylist, users, menus, edges, nodes, dags CASCADE`)
+	if err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+}
+
+// jsonEqual compares two JSON strings semantically (ignoring key order and
+// whitespace, which jsonb normalization does not guarantee).
+func jsonEqual(t *testing.T, a, b string) bool {
+	t.Helper()
+	var va, vb interface{}
+	if err := json.Unmarshal([]byte(a), &va); err != nil {
+		t.Fatalf("invalid json %q: %v", a, err)
+	}
+	if err := json.Unmarshal([]byte(b), &vb); err != nil {
+		t.Fatalf("invalid json %q: %v", b, err)
+	}
+	return reflect.DeepEqual(va, vb)
+}
+
+// ─── DAGs ────────────────────────────────────────────────────────────────────
+
+func TestPostgres_DAGCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	dag := models.Dag{
+		Name:        "test-dag",
+		Description: "a description",
+		Diagram:     `{"nodes":[{"id":"a"}],"edges":[]}`,
+		Created:     now,
+		Updated:     now,
+	}
+
+	id, err := p.CreateDAG(dag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("expected a generated id")
+	}
+
+	got, err := p.GetDAG(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != dag.Name || got.Description != dag.Description {
+		t.Errorf("name/description mismatch: got %+v", got)
+	}
+	if !jsonEqual(t, got.Diagram, dag.Diagram) {
+		t.Errorf("diagram mismatch: got %q want %q", got.Diagram, dag.Diagram)
+	}
+	if !got.Created.Equal(now) || !got.Updated.Equal(now) {
+		t.Errorf("timestamps mismatch: created=%v updated=%v", got.Created, got.Updated)
+	}
+
+	// Partial update must not clobber the fields left zero.
+	if err := p.UpdateDAG(id, models.Dag{Name: "renamed"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.GetDAG(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "renamed" {
+		t.Errorf("name not updated: %q", got.Name)
+	}
+	if got.Description != dag.Description {
+		t.Errorf("description clobbered: %q", got.Description)
+	}
+	if !jsonEqual(t, got.Diagram, dag.Diagram) {
+		t.Errorf("diagram clobbered: %q", got.Diagram)
+	}
+
+	// FindRelatedDAG matches on name + description + semantic diagram.
+	related, found, err := p.FindRelatedDAG(models.Dag{
+		Name: "renamed", Description: dag.Description, Diagram: dag.Diagram,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || related.Id != id {
+		t.Errorf("FindRelatedDAG: found=%v id=%q want %q", found, related.Id, id)
+	}
+
+	if err := p.DeleteDAG(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetDAG(id); err == nil {
+		t.Error("GetDAG succeeded after delete")
+	}
+}
+
+// A new DAG has an empty diagram and zero timestamps; those store as NULL and
+// must round-trip without scan errors.
+func TestPostgres_DAGEmptyFieldsRoundTrip(t *testing.T) {
+	p := newTestPostgres(t)
+
+	id, err := p.CreateDAG(models.Dag{Name: "empty"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.GetDAG(id)
+	if err != nil {
+		t.Fatalf("GetDAG on empty fields: %v", err)
+	}
+	if !got.Created.IsZero() || !got.Updated.IsZero() {
+		t.Errorf("expected zero timestamps, got created=%v updated=%v", got.Created, got.Updated)
+	}
+
+	// FindRelatedDAG must match rows whose diagram is NULL.
+	_, found, err := p.FindRelatedDAG(models.Dag{Name: "empty"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Error("FindRelatedDAG did not match NULL-diagram row")
+	}
+
+	summary, err := p.GetDAGsSummary(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary) != 1 {
+		t.Errorf("GetDAGsSummary: got %d rows, want 1", len(summary))
+	}
+}
+
+// ─── Nodes ───────────────────────────────────────────────────────────────────
+
+func TestPostgres_NodeCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	node := models.Node{
+		V:                    "n1",
+		Parent:               "root",
+		ValueLabel:           map[string]string{"label": "hello"},
+		ValueType:            "box",
+		ValueClusterLabelPos: "c",
+		ValueStyle:           "s",
+		Created:              now,
+	}
+
+	id, err := p.CreateNode(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("expected a generated id")
+	}
+
+	got, err := p.GetNode(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.V != node.V || got.Parent != node.Parent || got.ValueType != node.ValueType {
+		t.Errorf("scalar fields mismatch: got %+v", got)
+	}
+	if !reflect.DeepEqual(got.ValueLabel, node.ValueLabel) {
+		t.Errorf("value_label mismatch: got %v want %v", got.ValueLabel, node.ValueLabel)
+	}
+	if !got.Created.Equal(now) {
+		t.Errorf("created mismatch: %v", got.Created)
+	}
+
+	related, found, err := p.FindRelatedNode(node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || related.Id != id {
+		t.Errorf("FindRelatedNode: found=%v id=%q want %q", found, related.Id, id)
+	}
+
+	if err := p.DeleteNode(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetNode(id); err == nil {
+		t.Error("GetNode succeeded after delete")
+	}
+}
+
+// A node without a value_label stores NULL and must round-trip cleanly.
+func TestPostgres_NodeEmptyLabelRoundTrip(t *testing.T) {
+	p := newTestPostgres(t)
+
+	id, err := p.CreateNode(models.Node{V: "bare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.GetNode(id)
+	if err != nil {
+		t.Fatalf("GetNode on NULL value_label: %v", err)
+	}
+	if got.ValueLabel != nil {
+		t.Errorf("expected nil value_label, got %v", got.ValueLabel)
+	}
+
+	_, found, err := p.FindRelatedNode(models.Node{V: "bare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Error("FindRelatedNode did not match NULL-label row")
+	}
+}
+
+// ─── Edges ───────────────────────────────────────────────────────────────────
+
+func TestPostgres_EdgeCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	edge := models.Edge{
+		V:       "a",
+		W:       "b",
+		Label:   map[string]string{"label": "edge-label"},
+		Created: now,
+	}
+
+	id, err := p.CreateEdge(edge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("expected a generated id")
+	}
+
+	got, err := p.GetEdge(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.V != edge.V || got.W != edge.W {
+		t.Errorf("v/w mismatch: got %+v", got)
+	}
+	if !reflect.DeepEqual(got.Label, edge.Label) {
+		t.Errorf("label mismatch: got %v want %v", got.Label, edge.Label)
+	}
+	if !got.Created.Equal(now) {
+		t.Errorf("created mismatch: %v", got.Created)
+	}
+
+	related, found, err := p.FindRelatedEdge(edge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || related.Id != id {
+		t.Errorf("FindRelatedEdge: found=%v id=%q want %q", found, related.Id, id)
+	}
+
+	if err := p.DeleteEdge(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetEdge(id); err == nil {
+		t.Error("GetEdge succeeded after delete")
+	}
+}
+
+func TestPostgres_EdgeEmptyLabelRoundTrip(t *testing.T) {
+	p := newTestPostgres(t)
+
+	id, err := p.CreateEdge(models.Edge{V: "a", W: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.GetEdge(id)
+	if err != nil {
+		t.Fatalf("GetEdge on NULL label: %v", err)
+	}
+	if got.Label != nil {
+		t.Errorf("expected nil label, got %v", got.Label)
+	}
+
+	_, found, err := p.FindRelatedEdge(models.Edge{V: "a", W: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Error("FindRelatedEdge did not match NULL-label row")
+	}
+}
+
+// ─── Menus ───────────────────────────────────────────────────────────────────
+
+func TestPostgres_MenuCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	menu := models.Menu{Name: "file", Parent: "root", Options: "opts", Created: now}
+
+	id, err := p.CreateMenu(menu)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("expected a generated id")
+	}
+
+	got, err := p.GetMenu(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != menu.Name || got.Parent != menu.Parent || got.Options != menu.Options {
+		t.Errorf("menu mismatch: got %+v", got)
+	}
+
+	if err := p.UpdateMenu(id, models.Menu{Name: "edit"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.GetMenu(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "edit" || got.Parent != "root" {
+		t.Errorf("partial update wrong: got %+v", got)
+	}
+
+	related, found, err := p.FindRelatedMenu(models.Menu{Parent: "root", Options: "opts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || related.Id != id {
+		t.Errorf("FindRelatedMenu: found=%v id=%q want %q", found, related.Id, id)
+	}
+
+	options, err := p.GetMenusOptions(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := options[id]; !ok {
+		t.Error("GetMenusOptions missing created menu")
+	}
+
+	if err := p.DeleteMenu(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetMenu(id); err == nil {
+		t.Error("GetMenu succeeded after delete")
+	}
+}
+
+// ─── History ─────────────────────────────────────────────────────────────────
+
+func TestPostgres_HistoryOrderingAndPrune(t *testing.T) {
+	p := newTestPostgres(t)
+
+	dagID, err := p.CreateDAG(models.Dag{Name: "hist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const total = historyLimit + 10 // 60 snapshots, well past the 50 cap
+	for i := 0; i < total; i++ {
+		if err := p.AppendHistory(dagID, fmt.Sprintf(`{"n":%d}`, i), "tester"); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond) // distinct saved_at so ordering is deterministic
+	}
+
+	// pruneHistory runs in a background goroutine from AppendHistory; call it
+	// synchronously here so the test is deterministic.
+	p.pruneHistory(dagID)
+
+	hist, err := p.GetHistory(dagID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != historyLimit {
+		t.Fatalf("GetHistory: got %d entries, want %d", len(hist), historyLimit)
+	}
+
+	for i := 1; i < len(hist); i++ {
+		if hist[i-1].SavedAt.Before(hist[i].SavedAt) {
+			t.Error("history is not newest-first")
+		}
+	}
+	if n := snapshotN(t, hist[0].SnapshotJSON); n != total-1 {
+		t.Errorf("newest snapshot missing from head: n=%d want %d (%q)", n, total-1, hist[0].SnapshotJSON)
+	}
+	if n := snapshotN(t, hist[len(hist)-1].SnapshotJSON); n != total-historyLimit {
+		t.Errorf("expected %d to survive the prune, got n=%d (%q)",
+			total-historyLimit, n, hist[len(hist)-1].SnapshotJSON)
+	}
+}
+
+// snapshotN decodes {"n": <int>} snapshots produced by the prune test.
+func snapshotN(t *testing.T, s string) int {
+	t.Helper()
+	var v struct {
+		N int `json:"n"`
+	}
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		t.Fatalf("unexpected snapshot %q: %v", s, err)
+	}
+	return v.N
+}
+
+func TestPostgres_RestoreHistory(t *testing.T) {
+	p := newTestPostgres(t)
+
+	dagID, err := p.CreateDAG(models.Dag{Name: "restore", Diagram: `{"v":0}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AppendHistory(dagID, `{"v":1,"op":"set"}`, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	p.pruneHistory(dagID)
+
+	hist, err := p.GetHistory(dagID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hist) != 1 {
+		t.Fatalf("want 1 history entry, got %d", len(hist))
+	}
+
+	if err := p.RestoreHistory(hist[0].Id, dagID); err != nil {
+		t.Fatal(err)
+	}
+	dag, err := p.GetDAG(dagID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jsonEqual(t, dag.Diagram, `{"v":1,"op":"set"}`) {
+		t.Errorf("diagram not restored: %q", dag.Diagram)
+	}
+}
+
+// History is per-DAG: snapshots for one DAG must not leak into another.
+func TestPostgres_HistoryIsolation(t *testing.T) {
+	p := newTestPostgres(t)
+
+	dagA, _ := p.CreateDAG(models.Dag{Name: "a"})
+	dagB, _ := p.CreateDAG(models.Dag{Name: "b"})
+	if err := p.AppendHistory(dagA, `{"a":1}`, "u"); err != nil {
+		t.Fatal(err)
+	}
+
+	histA, err := p.GetHistory(dagA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	histB, err := p.GetHistory(dagB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(histA) != 1 || len(histB) != 0 {
+		t.Errorf("history leaked across DAGs: a=%d b=%d", len(histA), len(histB))
+	}
+}
+
+// AppendHistory with an empty snapshot stores NULL and must still read back.
+func TestPostgres_HistoryEmptySnapshotRoundTrip(t *testing.T) {
+	p := newTestPostgres(t)
+
+	dagID, err := p.CreateDAG(models.Dag{Name: "empty-snap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AppendHistory(dagID, "", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	hist, err := p.GetHistory(dagID)
+	if err != nil {
+		t.Fatalf("GetHistory on NULL snapshot: %v", err)
+	}
+	if len(hist) != 1 || hist[0].SnapshotJSON != "" {
+		t.Errorf("expected one empty snapshot, got %d entries (%q)", len(hist), hist[0].SnapshotJSON)
+	}
+}
+
+// ─── Shares & denylist ───────────────────────────────────────────────────────
+
+func TestPostgres_ShareCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	dagID, err := p.CreateDAG(models.Dag{Name: "shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	share := models.Share{
+		DagId:     dagID,
+		Jti:       uuid.New().String(),
+		Role:      "edit",
+		AnonName:  "Teal Fox",
+		CreatedBy: "admin",
+		ExpiresAt: now.Add(7 * 24 * time.Hour),
+		CreatedAt: now,
+	}
+	if err := p.CreateShare(share); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := p.GetShareByJti(share.Jti)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DagId != dagID || got.Role != "edit" || got.AnonName != "Teal Fox" || got.CreatedBy != "admin" {
+		t.Errorf("share mismatch: got %+v", got)
+	}
+	if !got.ExpiresAt.Equal(share.ExpiresAt) || !got.CreatedAt.Equal(share.CreatedAt) {
+		t.Errorf("share timestamps mismatch: got %+v", got)
+	}
+
+	// Deleting the DAG cascades its shares.
+	if err := p.DeleteDAG(dagID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.GetShareByJti(share.Jti); err == nil {
+		t.Error("GetShareByJti succeeded after DAG delete (cascade missing?)")
+	}
+}
+
+func TestPostgres_ShareDenylist(t *testing.T) {
+	p := newTestPostgres(t)
+
+	jti := uuid.New().String()
+	revoked, err := p.IsRevoked(jti)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked {
+		t.Fatal("jti reported revoked before any RevokeShare")
+	}
+
+	if err := p.RevokeShare(jti); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err = p.IsRevoked(jti)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !revoked {
+		t.Fatal("jti not revoked after RevokeShare")
+	}
+
+	// Re-revoking is idempotent.
+	if err := p.RevokeShare(jti); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err = p.IsRevoked(jti)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !revoked {
+		t.Fatal("jti lost its revoked state after re-revoke")
+	}
+
+	other := uuid.New().String()
+	revoked, err = p.IsRevoked(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked {
+		t.Fatal("unrelated jti reported revoked")
+	}
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+
+func TestPostgres_UserCRUD(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	user := models.User{Username: "alice", PasswordHash: "bcrypt-hash", CreatedAt: now}
+	if err := p.CreateUser(user); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := p.GetUser("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Username != "alice" || got.PasswordHash != "bcrypt-hash" {
+		t.Errorf("user mismatch: got %+v", got)
+	}
+	if !got.CreatedAt.Equal(now) {
+		t.Errorf("created_at mismatch: %v", got.CreatedAt)
+	}
+
+	// Unknown users return a zero value, not an error.
+	missing, err := p.GetUser("nobody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing.Username != "" {
+		t.Errorf("expected empty user for unknown name, got %+v", missing)
+	}
+
+	// Username is unique.
+	if err := p.CreateUser(models.User{Username: "alice", PasswordHash: "other"}); err == nil {
+		t.Error("expected unique constraint violation for duplicate username")
+	}
+}

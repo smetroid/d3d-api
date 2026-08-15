@@ -2,7 +2,6 @@
     bind_addr = "{{ .Env.BIND_ADDR }}"
     signing_key = "{{ .Env.SIGNING_KEY }}"
     auth_provider = "{{ .Env.AUTH_PROVIDER }}"
-    continuous_query_interval = "{{ .Env.CONTINUOUS_QUERY_INTERVAL }}"
     log_DAG_requests = {{ .Env.LOG_DAG_REQUESTS }}
     log_edge_requests = {{ .Env.LOG_EDGE_REQUESTS }}
     log_node_requests = {{ .Env.LOG_NODE_REQUESTS }}
@@ -27,29 +26,5 @@
     client_id = "{{ .Env.OAUTH_CLIENT_ID }}"
     response_type = "{{ .Env.OAUTH_RESPONSE_TYPE }}"
 
-[rethinkdb]
-    address = "{{ .Env.RETHINKDB_ADDRESS }}"
-    database = "{{ .Env.RETHINKDB_DATABASE }}"
-    alert_history_limit = {{ .Env.RETHINKDB_ALERT_HISTORY_LIMIT }}
-
-[notifiers]
-    trigger_severities = [{{ .Env.NOTIFIER_TRIGGER_SEVERITIES }}]
-
-[notifiers.file]
-    enabled = {{ .Env.FILE_NOTIFIER_ENABLED }}
-    files = ["stdout"]
-
-[notifiers.pagerduty]
-    enabled = {{ .Env.PAGERDUTY_NOTIFIER_ENABLED }}
-    service_key = "{{ .Env.PAGERDUTY_SERVICE_KEY }}"
-
-[notifiers.email]
-    enabled = {{ .Env.EMAIL_NOTIFIER_ENABLED }}
-    email = [{{ .Env.EMAIL_TO }}]
-    from = "{{ .Env.EMAIL_FROM }}"
-    smtp_server = "{{ .Env.EMAIL_SMTP_SERVER }}"
-    smtp_user = "{{ .Env.EMAIL_SMTP_USER }}"
-    smtp_password = "{{.Env.EMAIL_SMTP_PASSWORD }}"
-    skip_ssl_verify = {{ .Env.EMAIL_SKIP_SSL_VERIFY }}
-    smtp_port = {{ .Env.EMAIL_SMTP_PORT }}
-    samus_url = "{{ .Env.EMAIL_samus_URL }}"
+[postgres]
+    dsn = "{{ .Env.POSTGRES_DSN }}"

@@ -5,17 +5,17 @@ import (
 	"time"
 
 	tk "github.com/smetroid/d3d-api/app/auth/token"
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // LocalAuthProvider authenticates users against a bcrypt-hashed password
-// stored in the RethinkDB "users" table. Suitable for local development
+// stored in the Postgres "users" table. Suitable for local development
 // and self-hosted deployments that don't have an LDAP/OAuth server.
 type LocalAuthProvider struct {
 	signingKey    string
 	TokenDuration string `toml:"token_duration"`
-	DB            *rethinkdb.RethinkDB
+	DB            *postgres.Postgres
 }
 
 func (p *LocalAuthProvider) SetSigningKey(key string) {

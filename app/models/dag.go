@@ -8,32 +8,32 @@ import (
 
 type Dag struct {
 	//globally unique random UUID
-	Id string `gorethink:"id,opmitempty" json:"id"`
+	Id string `db:"id" json:"id"`
 
 	//Title
-	Name string `gorethink:"name" json:"name"`
+	Name string `db:"name" json:"name"`
 
 	//Dag diagram long description
-	Description string `gorethink:"description" json:"description"`
+	Description string `db:"description" json:"description"`
 
 	//list of edges and nodes for the diagram
-	Diagram string `gorethink:"diagram" json:"diagram"`
+	Diagram string `db:"diagram" json:"diagram"`
 
 	//UTC date and time the diagram was generated in ISO 8601 format
-	Created time.Time `gorethink:"created" json:"created"`
+	Created time.Time `db:"created" json:"created"`
 
-	Updated time.Time `gorethink:"updated" json:"updated"`
+	Updated time.Time `db:"updated" json:"updated"`
 
 	// ClientId is used for WS echo prevention — not persisted to DB.
-	ClientId string `gorethink:"-" json:"clientId,omitempty"`
+	ClientId string `db:"-" json:"clientId,omitempty"`
 }
 
 type DagHistory struct {
-	Id           string    `gorethink:"id" json:"id"`
-	DagId        string    `gorethink:"dag_id" json:"dagId"`
-	SnapshotJSON string    `gorethink:"snapshot_json" json:"snapshotJson"`
-	SavedBy      string    `gorethink:"saved_by" json:"savedBy"`
-	SavedAt      time.Time `gorethink:"saved_at" json:"savedAt"`
+	Id           string    `db:"id" json:"id"`
+	DagId        string    `db:"dag_id" json:"dagId"`
+	SnapshotJSON string    `db:"snapshot_json" json:"snapshotJson"`
+	SavedBy      string    `db:"saved_by" json:"savedBy"`
+	SavedAt      time.Time `db:"saved_at" json:"savedAt"`
 }
 
 type DagHistoryResponse struct {

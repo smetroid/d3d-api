@@ -1,8 +1,16 @@
 SHELL := /bin/bash
-NAME=rethinkdb
+POSTGRES_CONTAINER=pg
+POSTGRES_DSN?=postgres://postgres:postgres@localhost:5432/samus?sslmode=disable
+RETHINKDB_CONTAINER=rethinkdb
+
+postgres-start:
+	docker start $(POSTGRES_CONTAINER) 2>/dev/null || docker run -d --name $(POSTGRES_CONTAINER) -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+
+postgres-stop:
+	docker stop $(POSTGRES_CONTAINER)
 
 start-api-service:
-	docker start rethinkdb
+	$(MAKE) postgres-start
 	gin --all run samus.go
 
 install-gin-autoreload:
@@ -35,3 +43,9 @@ kill-debug:
 	$(eval DLV:=$(shell cat /tmp/dlv.id 2>&1 /dev/null ))
 	@if [ -z ${DLV} ];then kill -9 $(DLV); else echo "dlv.Id not found"; fi
 
+# Copy data from a running RethinkDB into Postgres (idempotent; see README).
+migrate-from-rethinkdb:
+	go run ./cmd/migrate-rb2pg \
+		-rb-address localhost:28015 \
+		-rb-database samus \
+		-pg-dsn "$(POSTGRES_DSN)"

@@ -25,20 +25,11 @@ func (r *RenderWrapper) Render(w io.Writer, name string, data interface{}, c ech
 }
 
 func BuildApp(config config.SamusConfig) (e *echo.Echo) {
-	config.Notifiers.Init()
-
-	err := config.Rethinkdb.Init()
+	err := config.Postgres.Init()
 	if err != nil {
 		log.Fatal(err)
 	}
-	db := config.Rethinkdb
-
-	continuousQueryService := &services.ContinuousQueryService{
-		DB:            db,
-		QueryInterval: config.Samus.ContinuousQueryInterval.Duration,
-		Notifiers:     config.Notifiers,
-	}
-	go continuousQueryService.Start()
+	db := &config.Postgres
 
 	//loadConfiguration()
 	r := &RenderWrapper{render.New(render.Options{
@@ -74,19 +65,19 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 	authController.Init()
 
 	dagService := services.DAGService{
-		DB: &db,
+		DB: db,
 	}
 
 	edgeService := services.EdgeService{
-		DB: &db,
+		DB: db,
 	}
 
 	nodeService := services.NodeService{
-		DB: &db,
+		DB: db,
 	}
 
 	menuService := services.MenuService{
-		DB: &db,
+		DB: db,
 	}
 
 	hub := collab.NewHub()
@@ -95,7 +86,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		Echo:           e,
 		DAGService:     dagService,
 		Hub:            hub,
-		DB:             &db,
+		DB:             db,
 		AuthMiddleware: authMiddleware,
 		LogDAGRequests: config.Samus.LogDAGRequests,
 	}
@@ -123,7 +114,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	sharesController := controllers.SharesController{
 		Echo:           e,
-		DB:             &db,
+		DB:             db,
 		SigningKey:      config.Samus.SigningKey,
 		AuthMiddleware: authMiddleware,
 	}
@@ -170,7 +161,7 @@ func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvide
 	case "oauth":
 		authProvider = &config.OAuth
 	case "localauth":
-		authProvider = &localauth.LocalAuthProvider{DB: &config.Rethinkdb}
+		authProvider = &localauth.LocalAuthProvider{DB: &config.Postgres}
 	}
 
 	err := authProvider.Connect()

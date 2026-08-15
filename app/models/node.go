@@ -11,12 +11,12 @@ type Node struct {
 	Id string `gorethink:"id,opmitempty" json:"id"`
 	//Id string `gorethink:"id,opmitempty"`
 
-	V                    string            `gorethink:"v json:"v"`
+	V                    string            `gorethink:"v" json:"v"`
 	Parent               string            `gorethink:"parent" json:"parent"`
 	ValueLabel           map[string]string `gorethink:"valueLabel" json:"value.label"`
-	ValueType            string            `gorethink:"labelType json:"value.labeltype"`
-	ValueClusterLabelPos string            `gorethink:"clusterLabelPos json:"value.clusterlabelpos"`
-	ValueStyle           string            `gorethink:"clusterStyle json:"value.style"`
+	ValueType            string            `gorethink:"labelType" json:"value.labeltype"`
+	ValueClusterLabelPos string            `gorethink:"clusterLabelPos" json:"value.clusterlabelpos"`
+	ValueStyle           string            `gorethink:"clusterStyle" json:"value.style"`
 	//UTC date and time the alert was generated in ISO 8601 format
 	Created time.Time `gorethink:"created" json:"created"`
 }

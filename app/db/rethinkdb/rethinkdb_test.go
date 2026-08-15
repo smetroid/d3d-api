@@ -9,18 +9,14 @@ import (
 func TestRethinkDB_CRUD_DAG(t *testing.T) {
 	db := getTestDB(t)
 
-	nodes := &models.Node{}
-	edges := &models.Edge{}
 	dag := &models.Dag{
-		Title:       "dagre_test",
+		Name:        "dagre_test",
 		Description: "This is my first test",
-		Edges:       nodes,
-		Nodes:       edges,
 	}
 	dag.GenerateDefaults()
 
 	//Create a new DAG
-	id, err := db.CreateDAG(*dag)
+	_, err := db.CreateDAG(*dag)
 	if err != nil {
 		t.Fatal(err)
 	}

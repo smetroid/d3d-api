@@ -40,7 +40,6 @@ func (dc *EdgeController) createEdge(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusCreated, edgesResponse)
-	return nil
 }
 
 func (dc *EdgeController) getEdges(ctx echo.Context) error {

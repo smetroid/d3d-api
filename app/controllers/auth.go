@@ -32,7 +32,7 @@ func (ac *AuthController) LoginHandler(ctx echo.Context) error {
 		return ctx.JSON(http.StatusUnauthorized, models.ErrorResponse("Login failed"))
 	}
 
-	authToken := models.AuthToken{token}
+	authToken := models.AuthToken{Token: token}
 
 	//	cookie := new(http.Cookie)
 	//	cookie.Name = "jwt_token"

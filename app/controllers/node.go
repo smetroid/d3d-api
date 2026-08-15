@@ -39,7 +39,6 @@ func (dc *NodeController) createNode(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusCreated, nodesResponse)
-	return nil
 }
 
 func (dc *NodeController) getNodes(ctx echo.Context) error {

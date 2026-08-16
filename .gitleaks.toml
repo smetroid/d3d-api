@@ -1,0 +1,12 @@
+# gitleaks configuration: default rules plus a allowlist for the repository's
+# known public test fixtures and dev-only defaults.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public test fixtures, docs samples, and dev-only defaults"
+paths = [
+  '''app/auth/ldap/ldap_test\.go''',   # public LDAP test server creds (forumsys)
+  '''README\.md''',                   # dev signing key sample value
+  '''docs/.*\.md''',
+]

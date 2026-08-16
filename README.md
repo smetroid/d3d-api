@@ -189,3 +189,39 @@ For the full step-by-step production cutover (freeze, preflight, migrate, verify
 ## Deployment
 
 The repo includes a `Dockerfile` and `fly.toml` for [Fly.io](https://fly.io) deployment. The image runs the API binary, which reads its config from `./samus.toml` (or the path given by `--config`). Provide a `samus.toml` with a `[postgres] dsn` pointing at your Postgres instance; `samus.tmpl` is an env-substitution template for rendering that config from environment variables (e.g. `POSTGRES_DSN`). CI is required to pass before deploy.
+
+## CI/CD
+
+GitHub Actions drives quality gates and deploys:
+
+| Workflow | Triggers | Checks / actions |
+|---|---|---|
+| `.github/workflows/ci.yml` | every PR + push to `main` | gitleaks secret scan, golangci-lint, `go test -race` against a Postgres 16 service container (`TEST_DATABASE_URL`), `CGO_ENABLED=0 go build`, `go vet`, `go mod tidy` drift check |
+| `.github/workflows/deploy.yml` | push to `main` | build image → push to GHCR (`ghcr.io/smetroid/d3d-api`) → `flyctl deploy` |
+
+Repository secrets required for deploy: `FLY_API_TOKEN` (from `flyctl auth token` or the Fly dashboard). GHCR auth uses the automatic `GITHUB_TOKEN`; no extra secret needed.
+
+Branch protection on `main` should require the `CI` workflow to pass before merging.
+
+## Pre-commit hooks
+
+A `.pre-commit-config.yaml` runs local quality gates before every commit:
+
+- `gitleaks` — secrets scanning
+- `golangci-lint` — linting (`.golangci.yml`)
+- `gofmt`, `go mod tidy` drift check
+- generic file hygiene (`trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`)
+
+Install once:
+
+```bash
+make precommit-install   # pre-commit install
+```
+
+Run manually at any time:
+
+```bash
+make precommit-run       # pre-commit run --all-files
+```
+
+The `gitleaks` allowlist (public test fixtures in `app/auth/ldap/ldap_test.go`, docs samples) lives in `.gitleaks.toml`.

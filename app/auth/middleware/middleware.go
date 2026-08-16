@@ -190,7 +190,7 @@ const (
 	bearer = "Bearer"
 )
 
-// Algorithims
+// Supported signing algorithms.
 const (
 	AlgorithmHS256 = "HS256"
 )

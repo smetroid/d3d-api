@@ -16,12 +16,12 @@ import (
 func newTestClient(t *testing.T, hub *Hub, dagId string) (*Client, *websocket.Conn) {
 	t.Helper()
 
-	var serverConn *websocket.Conn
+	var serverConnCh = make(chan *websocket.Conn, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		up := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 		conn, err := up.Upgrade(w, r, nil)
 		require.NoError(t, err)
-		serverConn = conn
+		serverConnCh <- conn
 	}))
 	t.Cleanup(srv.Close)
 
@@ -30,8 +30,7 @@ func newTestClient(t *testing.T, hub *Hub, dagId string) (*Client, *websocket.Co
 	require.NoError(t, err)
 	t.Cleanup(func() { clientConn.Close() })
 
-	// Give the handler goroutine time to set serverConn.
-	time.Sleep(10 * time.Millisecond)
+	serverConn := <-serverConnCh
 
 	client := &Client{
 		DagId: dagId,
@@ -139,7 +138,7 @@ func TestClient_WritePump(t *testing.T) {
 	msg := []byte(`{"type":"presence"}`)
 	client.Send <- msg
 
-	clientConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(200*time.Millisecond)))
 	_, got, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	assert.Equal(t, msg, got)

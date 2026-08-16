@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -686,6 +687,7 @@ func (p *Postgres) pruneHistory(dagId string) {
 		  )`, dagId, historyLimit)
 	if err != nil {
 		// Pruning is best-effort; a busy loop retrying adds little value here.
+		log.Printf("history prune error dag=%s: %v", dagId, err)
 	}
 }
 

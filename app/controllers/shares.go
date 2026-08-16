@@ -35,7 +35,7 @@ func randomAnonName() string {
 type SharesController struct {
 	Echo           *echo.Echo
 	DB             *postgres.Postgres
-	SigningKey      string
+	SigningKey     string
 	AuthMiddleware echo.MiddlewareFunc
 }
 

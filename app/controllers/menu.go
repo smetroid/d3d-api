@@ -25,11 +25,8 @@ func (dc *MenuController) Init() {
 }
 
 func (mc *MenuController) createMenu(ctx echo.Context) error {
-	if mc.LogMenuRequests {
-		// request, _ := ioutil.ReadAll(ctx.Request().Body)
-		// log.Println(string(request))
-		// log.Println(string("test"))
-	}
+	// request, _ := ioutil.ReadAll(ctx.Request().Body)
+	// log.Println(string(request))
 
 	var newMenu models.Menu
 

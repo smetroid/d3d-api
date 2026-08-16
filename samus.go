@@ -56,5 +56,7 @@ func main() {
 	cfg := config.BuildConfig(configFile)
 	echo := app.BuildApp(cfg)
 	log.Println("Starting samus server...")
-	echo.Start(cfg.Samus.BindAddr)
+	if err := echo.Start(cfg.Samus.BindAddr); err != nil {
+		log.Fatal(err)
+	}
 }

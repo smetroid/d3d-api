@@ -3,7 +3,6 @@ package app
 import (
 	"io"
 	"log"
-	"net/http"
 
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth"
@@ -54,7 +53,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	authProvider := BuildAuthProvider(config)
 	authMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		SigningKey:   []byte(config.Samus.SigningKey),
+		SigningKey:  []byte(config.Samus.SigningKey),
 		TokenLookup: "header:Authorization,query:api-key,query:token",
 	})
 
@@ -115,7 +114,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 	sharesController := controllers.SharesController{
 		Echo:           e,
 		DB:             db,
-		SigningKey:      config.Samus.SigningKey,
+		SigningKey:     config.Samus.SigningKey,
 		AuthMiddleware: authMiddleware,
 	}
 
@@ -177,36 +176,12 @@ func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvide
 	return
 }
 
-func dagrelib(c echo.Context) error {
-	return c.Render(http.StatusOK, "dagrelib", map[string]string{"hello": "bunny", "footer": "footer data -- feet", "header": "head"})
-}
-
-func index(c echo.Context) error {
-	return c.Render(http.StatusOK, "index", map[string]string{"hello": "bunny", "footer": "footer data -- feet", "header": "head"})
-}
-
-func navigation(c echo.Context) error {
-	return c.Render(http.StatusOK, "navigation", map[string]string{"hello": "bunny", "footer": "footer data -- feet", "header": "head"})
-}
-
-//func samus(c echo.Context) error {
-//	return c.File("vue/index.html")
-//}
-
 func samus(c echo.Context) error {
 	return c.File("vue/dist/index.html")
 }
 
-func samus2(c echo.Context) error {
-	return c.File("public/samus.html")
-}
-
 func test(c echo.Context) error {
 	return c.File("public/test.html")
-}
-
-func logo(c echo.Context) error {
-	return c.File("public/logo.html")
 }
 
 func yaml(c echo.Context) error {

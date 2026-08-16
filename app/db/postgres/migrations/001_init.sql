@@ -51,7 +51,7 @@ CREATE TABLE nodes (
     value_type            text        NOT NULL DEFAULT '',
     value_cluster_label_pos text      NOT NULL DEFAULT '',
     value_style           text        NOT NULL DEFAULT '',
-    created               timestamptz 
+    created               timestamptz
 );
 
 CREATE TABLE edges (
@@ -59,7 +59,7 @@ CREATE TABLE edges (
     v       text        NOT NULL DEFAULT '',
     w       text        NOT NULL DEFAULT '',
     label   jsonb,
-    created timestamptz 
+    created timestamptz
 );
 
 CREATE TABLE menus (
@@ -67,7 +67,7 @@ CREATE TABLE menus (
     name    text        NOT NULL DEFAULT '',
     parent  text        NOT NULL DEFAULT '',
     options text        NOT NULL DEFAULT '',
-    created timestamptz 
+    created timestamptz
 );
 
 -- +goose Down

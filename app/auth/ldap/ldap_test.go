@@ -14,7 +14,9 @@ func TestLDAPAuthProvider_Authenticate(t *testing.T) {
 		BaseDN:       "dc=example,dc=com",
 	}
 
-	ldapAuthProvider.Connect()
+	if err := ldapAuthProvider.Connect(); err != nil {
+		t.Fatalf("ldap connect: %v", err)
+	}
 	defer ldapAuthProvider.Close()
 
 	authenticated, _, err := ldapAuthProvider.Authenticate("gauss", "password")

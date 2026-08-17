@@ -22,11 +22,9 @@ func (dc *EdgeController) Init() {
 }
 
 func (dc *EdgeController) createEdge(ctx echo.Context) error {
-	if dc.LogEdgeRequests {
-		// Commenting this out causing EOF errors... ctx.REquest can only be read once
-		//request, _ := ioutil.ReadAll(ctx.Request().Body)
-		//log.Println(string(request))
-	}
+	// Commenting this out causing EOF errors... ctx.Request can only be read once
+	// request, _ := ioutil.ReadAll(ctx.Request().Body)
+	// log.Println(string(request))
 
 	var incomingEdge models.Edge
 	err := ctx.Bind(&incomingEdge)
@@ -47,18 +45,6 @@ func (dc *EdgeController) getEdges(ctx echo.Context) error {
 	edgesResponse, err := dc.EdgeService.GetEdges(ctx.QueryParams())
 	return dc.StandardResponse(ctx, edgesResponse, err)
 
-}
-
-func (dc *EdgeController) getEdge(ctx echo.Context) error {
-	edgeResponse, err := dc.EdgeService.GetEdge(ctx.Param("edges"))
-	return dc.StandardResponse(ctx, edgeResponse, err)
-}
-
-func (dc *EdgeController) deleteEdge(ctx echo.Context) error {
-	err := dc.EdgeService.DeleteEdge(ctx.Param("edge"))
-	return dc.StandardResponse(ctx, struct {
-		Status string `json:"status"`
-	}{Status: "ok"}, err)
 }
 
 func (ac *EdgeController) StandardResponse(ctx echo.Context, response interface{}, err error) error {

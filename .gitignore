@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# Built API binaries (Makefile `build` / Dockerfile)
+/main
+/samus
+
 # Test binary, built with `go test -c`
 *.test
 

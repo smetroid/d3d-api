@@ -1,15 +1,24 @@
 SHELL := /bin/bash
-NAME=rethinkdb
+POSTGRES_CONTAINER=pg
+POSTGRES_DSN?=postgres://postgres:postgres@localhost:5432/samus?sslmode=disable
+RETHINKDB_CONTAINER=rethinkdb
+
+.PHONY: postgres-start postgres-stop start-api-service install-gin-autoreload go-requirements \
+	run-debug kill-debug migrate-from-rethinkdb lint test test-postgres build check \
+	precommit-install precommit-run
+
+postgres-start:
+	docker start $(POSTGRES_CONTAINER) 2>/dev/null || docker run -d --name $(POSTGRES_CONTAINER) -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+
+postgres-stop:
+	docker stop $(POSTGRES_CONTAINER)
 
 start-api-service:
-	docker start rethinkdb
+	$(MAKE) postgres-start
 	gin --all run samus.go
 
 install-gin-autoreload:
 	go install github.com/codegangsta/gin@latest
-
-run-unit-test:
-	testcafe "chrome:headless" tests/navigation.js
 
 # 1.16.4 golang upgrade
 go-requirements:
@@ -31,7 +40,34 @@ run-debug:
 
 kill-debug:
 	$(eval ID:=$(shell cat /tmp/samus.id))
-	@if [ -z ${ID} ];then kill -9 $(ID); else echo "samus.id not found"; fi
-	$(eval DLV:=$(shell cat /tmp/dlv.id 2>&1 /dev/null ))
-	@if [ -z ${DLV} ];then kill -9 $(DLV); else echo "dlv.Id not found"; fi
+	@if [ -n "${ID}" ]; then kill -9 ${ID}; else echo "samus.id not found"; fi
+	$(eval DLV:=$(shell cat /tmp/dlv.id 2>/dev/null))
+	@if [ -n "${DLV}" ]; then kill -9 ${DLV}; else echo "dlv.id not found"; fi
 
+# CI/quality checks
+lint:
+	golangci-lint run --timeout 5m
+
+test:
+	go test -race -count=1 ./...
+
+test-postgres:
+	TEST_DATABASE_URL="$(POSTGRES_DSN)" go test -race -count=1 ./app/db/postgres/...
+
+build:
+	CGO_ENABLED=0 go build -o main .
+
+check: lint test build
+
+precommit-install:
+	pre-commit install
+
+precommit-run:
+	pre-commit run --all-files
+
+# Copy data from a running RethinkDB into Postgres (idempotent; see README).
+migrate-from-rethinkdb:
+	go run ./cmd/migrate-rb2pg \
+		-rb-address localhost:28015 \
+		-rb-database samus \
+		-pg-dsn "$(POSTGRES_DSN)"

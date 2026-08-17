@@ -3,12 +3,12 @@ package services
 import (
 	"log"
 
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
 type DAGService struct {
-	DB *rethinkdb.RethinkDB
+	DB *postgres.Postgres
 }
 
 func (ds *DAGService) GetDAG(id string) (dagResponse models.DAGResponse, err error) {

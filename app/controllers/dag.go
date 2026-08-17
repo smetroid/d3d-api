@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/collab"
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 	"github.com/smetroid/d3d-api/app/services"
 )
@@ -22,7 +22,7 @@ type DAGsController struct {
 	Echo           *echo.Echo
 	DAGService     services.DAGService
 	Hub            *collab.Hub
-	DB             *rethinkdb.RethinkDB
+	DB             *postgres.Postgres
 	AuthMiddleware echo.MiddlewareFunc
 	LogDAGRequests bool
 }
@@ -39,13 +39,10 @@ func (dc *DAGsController) Init() {
 }
 
 func (dc *DAGsController) createDAG(ctx echo.Context) error {
-
-	if dc.LogDAGRequests {
-		// Commenting the lines below fixes the EOF error
-		// request, _ := ioutil.ReadAll(ctx.Request().Body)
-		// log.Println("Dag Request")
-		// log.Println(string(request))
-	}
+	// Commenting the lines below fixes the EOF error
+	// request, _ := ioutil.ReadAll(ctx.Request().Body)
+	// log.Println("Dag Request")
+	// log.Println(string(request))
 
 	var incomingDag models.Dag
 	err := ctx.Bind(&incomingDag)
@@ -96,10 +93,8 @@ func (dc *DAGsController) updateDAG(ctx echo.Context) error {
 
 	var dagUpdate models.Dag
 
-	if dc.LogDAGRequests {
-		// request, _ := ioutil.ReadAll(ctx.Request().Body)
-		// log.Println(string(request))
-	}
+	// request, _ := ioutil.ReadAll(ctx.Request().Body)
+	// log.Println(string(request))
 
 	err := ctx.Bind(&dagUpdate)
 	if err != nil {

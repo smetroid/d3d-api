@@ -3,7 +3,6 @@ package oauth
 import (
 	"bytes"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,7 +70,7 @@ func (op *OAuthAuthProvider) Authenticate(username, password string) (authentica
 		return
 	} else {
 		message, _ := io.ReadAll(resp.Body)
-		OAuthFailed(errors.New(fmt.Sprintf("response code: %d message: %s", resp.StatusCode, message)))
+		OAuthFailed(fmt.Errorf("response code: %d message: %s", resp.StatusCode, message))
 		return
 	}
 }

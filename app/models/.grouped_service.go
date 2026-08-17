@@ -1,9 +1,9 @@
 package models
 
 type GroupedService struct {
-	Service     string `gorethink:"service" json:"service"`
-	Environment string `gorethink:"environment" json:"environment"`
-	Count       int    `gorethink:"count" json:"count"`
+	Service     string `db:"service" json:"service"`
+	Environment string `db:"environment" json:"environment"`
+	Count       int    `db:"count" json:"count"`
 }
 
 type GroupedServiceResponse struct {

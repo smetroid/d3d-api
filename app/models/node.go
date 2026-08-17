@@ -8,17 +8,16 @@ import (
 
 type Node struct {
 	//globally unique random UUID
-	Id string `gorethink:"id,opmitempty" json:"id"`
-	//Id string `gorethink:"id,opmitempty"`
+	Id string `db:"id" json:"id"`
 
-	V                    string            `gorethink:"v" json:"v"`
-	Parent               string            `gorethink:"parent" json:"parent"`
-	ValueLabel           map[string]string `gorethink:"valueLabel" json:"value.label"`
-	ValueType            string            `gorethink:"labelType" json:"value.labeltype"`
-	ValueClusterLabelPos string            `gorethink:"clusterLabelPos" json:"value.clusterlabelpos"`
-	ValueStyle           string            `gorethink:"clusterStyle" json:"value.style"`
+	V                    string            `db:"v" json:"v"`
+	Parent               string            `db:"parent" json:"parent"`
+	ValueLabel           map[string]string `db:"value_label" json:"value.label"`
+	ValueType            string            `db:"value_type" json:"value.labeltype"`
+	ValueClusterLabelPos string            `db:"value_cluster_label_pos" json:"value.clusterlabelpos"`
+	ValueStyle           string            `db:"value_style" json:"value.style"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	Created time.Time `gorethink:"created" json:"created"`
+	Created time.Time `db:"created" json:"created"`
 }
 
 type NodeResponse struct {

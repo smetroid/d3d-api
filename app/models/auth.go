@@ -7,7 +7,7 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-//JSON struct that holds generated authorization token
+// JSON struct that holds generated authorization token
 type AuthToken struct {
 	Token string `json:"token"`
 }

@@ -8,12 +8,12 @@ import (
 
 type Edge struct {
 	//globally unique random UUID
-	Id string `gorethink:"id,opmitempty" json:"id"`
+	Id string `db:"id" json:"id"`
 	//UTC date and time the alert was generated in ISO 8601 format
-	Created time.Time         `gorethink:"created" json:"created"`
-	V       string            `gorethink:"v" json:"v"`
-	W       string            `gorethink:"w" json:"w"`
-	Label   map[string]string `gorethink:"label" json:"value.label"`
+	Created time.Time         `db:"created" json:"created"`
+	V       string            `db:"v" json:"v"`
+	W       string            `db:"w" json:"w"`
+	Label   map[string]string `db:"label" json:"value.label"`
 }
 
 type EdgeResponse struct {

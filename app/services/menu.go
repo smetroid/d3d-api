@@ -3,12 +3,12 @@ package services
 import (
 	"log"
 
-	"github.com/smetroid/d3d-api/app/db/rethinkdb"
+	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
 type MenuService struct {
-	DB *rethinkdb.RethinkDB
+	DB *postgres.Postgres
 }
 
 func (ds *MenuService) GetMenu(id string) (MenuResponse models.MenuResponse, err error) {

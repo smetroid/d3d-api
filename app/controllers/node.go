@@ -22,10 +22,8 @@ func (dc *NodeController) Init() {
 }
 
 func (dc *NodeController) createNode(ctx echo.Context) error {
-	if dc.LogNodeRequests {
-		// request, _ := ioutil.ReadAll(ctx.Request().Body)
-		// log.Println(string(request))
-	}
+	// request, _ := ioutil.ReadAll(ctx.Request().Body)
+	// log.Println(string(request))
 
 	var incomingNode models.Node
 	err := ctx.Bind(&incomingNode)
@@ -46,18 +44,6 @@ func (dc *NodeController) getNodes(ctx echo.Context) error {
 	nodesResponse, err := dc.NodeService.GetNodes(ctx.QueryParams())
 	return dc.StandardResponse(ctx, nodesResponse, err)
 
-}
-
-func (dc *NodeController) getNode(ctx echo.Context) error {
-	nodeResponse, err := dc.NodeService.GetNode(ctx.Param("nodes"))
-	return dc.StandardResponse(ctx, nodeResponse, err)
-}
-
-func (dc *NodeController) deleteNode(ctx echo.Context) error {
-	err := dc.NodeService.DeleteNode(ctx.Param("node"))
-	return dc.StandardResponse(ctx, struct {
-		Status string `json:"status"`
-	}{Status: "ok"}, err)
 }
 
 func (ac *NodeController) StandardResponse(ctx echo.Context, response interface{}, err error) error {

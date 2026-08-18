@@ -10,7 +10,7 @@
     { "src": "/(.*)", "dest": "/" }
   ],
   "env": {
-    "AUTH_PROVIDER": "local",
+    "AUTH_PROVIDER": "localauth",
     "LOG_DAG_REQUESTS": "true",
     "LOG_EDGE_REQUESTS": "true",
     "LOG_NODE_REQUESTS": "true",

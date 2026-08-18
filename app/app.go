@@ -159,7 +159,7 @@ func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvide
 		authProvider = &config.Ldap
 	case "oauth":
 		authProvider = &config.OAuth
-	case "localauth":
+	case "local", "localauth":
 		authProvider = &localauth.LocalAuthProvider{DB: &config.Postgres}
 	}
 

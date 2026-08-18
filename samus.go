@@ -53,6 +53,34 @@ func main() {
 		return
 	}
 
+	// changePassword <username> <new-password> [--config=<file>]
+	if len(os.Args) >= 2 && os.Args[1] == "changePassword" {
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "usage: samus changePassword <username> <new-password>")
+			os.Exit(1)
+		}
+		username := os.Args[2]
+		newPassword := os.Args[3]
+		if len(os.Args) >= 6 && os.Args[4] == "--config" {
+			configFile = os.Args[5]
+		}
+
+		cfg := config.BuildConfig(configFile)
+		if err := cfg.Postgres.Init(); err != nil {
+			log.Fatal("postgres init:", err)
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			log.Fatal("bcrypt:", err)
+		}
+		if err := cfg.Postgres.UpdateUserPassword(username, string(hash)); err != nil {
+			log.Fatal("update password:", err)
+		}
+		fmt.Printf("password updated for %q\n", username)
+		return
+	}
+
 	cfg := config.BuildConfig(configFile)
 	echo := app.BuildApp(cfg)
 	log.Println("Starting samus server...")

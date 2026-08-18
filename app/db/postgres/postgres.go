@@ -658,6 +658,18 @@ func (p *Postgres) GetUser(username string) (models.User, error) {
 	return u, err
 }
 
+func (p *Postgres) UpdateUserPassword(username, passwordHash string) error {
+	tag, err := p.pool.Exec(context.Background(), `
+		UPDATE users SET password_hash = $1 WHERE username = $2`, passwordHash, username)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
+}
+
 // ─── History ────────────────────────────────────────────────────────────────
 
 const historyLimit = 50

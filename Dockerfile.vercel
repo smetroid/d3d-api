@@ -1,0 +1,21 @@
+# Build stage
+FROM golang:1.23 AS builder
+WORKDIR /app
+COPY . .
+RUN go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+
+# Runtime stage
+FROM alpine:latest
+RUN apk add --no-cache curl \
+    && curl -fsSL https://github.com/hairyhenderson/gomplate/releases/download/v5.2.0/gomplate_linux-amd64 \
+       -o /usr/local/bin/gomplate \
+    && chmod +x /usr/local/bin/gomplate
+WORKDIR /root/
+COPY --from=builder /app/main .
+COPY samus.tmpl ./samus.tmpl
+ARG CACHEBUST=1
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+EXPOSE 80
+ENTRYPOINT ["./entrypoint.sh"]

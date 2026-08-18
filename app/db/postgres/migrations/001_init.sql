@@ -1,5 +1,5 @@
 -- +goose Up
-CREATE TABLE dags (
+CREATE TABLE IF NOT EXISTS dags (
     id          uuid        PRIMARY KEY,
     name        text        NOT NULL DEFAULT '',
     description text        NOT NULL DEFAULT '',
@@ -8,7 +8,7 @@ CREATE TABLE dags (
     updated     timestamptz
 );
 
-CREATE TABLE dag_history (
+CREATE TABLE IF NOT EXISTS dag_history (
     id            uuid        PRIMARY KEY,
     dag_id        uuid        NOT NULL REFERENCES dags (id) ON DELETE CASCADE,
     snapshot_json jsonb,
@@ -16,9 +16,9 @@ CREATE TABLE dag_history (
     saved_at      timestamptz NOT NULL
 );
 
-CREATE INDEX dag_history_dag_id_saved_at_idx ON dag_history (dag_id, saved_at DESC);
+CREATE INDEX IF NOT EXISTS dag_history_dag_id_saved_at_idx ON dag_history (dag_id, saved_at DESC);
 
-CREATE TABLE shares (
+CREATE TABLE IF NOT EXISTS shares (
     id         uuid        PRIMARY KEY,
     dag_id     uuid        NOT NULL REFERENCES dags (id) ON DELETE CASCADE,
     jti        uuid        NOT NULL UNIQUE,
@@ -29,21 +29,21 @@ CREATE TABLE shares (
     created_at timestamptz NOT NULL
 );
 
-CREATE INDEX shares_dag_id_idx ON shares (dag_id);
+CREATE INDEX IF NOT EXISTS shares_dag_id_idx ON shares (dag_id);
 
-CREATE TABLE share_denylist (
+CREATE TABLE IF NOT EXISTS share_denylist (
     jti        uuid        PRIMARY KEY,
     revoked_at timestamptz NOT NULL
 );
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id            uuid        PRIMARY KEY,
     username      text        NOT NULL UNIQUE,
     password_hash text        NOT NULL,
     created_at    timestamptz NOT NULL
 );
 
-CREATE TABLE nodes (
+CREATE TABLE IF NOT EXISTS nodes (
     id                    uuid        PRIMARY KEY,
     v                     text        NOT NULL DEFAULT '',
     parent                text        NOT NULL DEFAULT '',
@@ -54,7 +54,7 @@ CREATE TABLE nodes (
     created               timestamptz
 );
 
-CREATE TABLE edges (
+CREATE TABLE IF NOT EXISTS edges (
     id      uuid        PRIMARY KEY,
     v       text        NOT NULL DEFAULT '',
     w       text        NOT NULL DEFAULT '',
@@ -62,7 +62,7 @@ CREATE TABLE edges (
     created timestamptz
 );
 
-CREATE TABLE menus (
+CREATE TABLE IF NOT EXISTS menus (
     id      uuid        PRIMARY KEY,
     name    text        NOT NULL DEFAULT '',
     parent  text        NOT NULL DEFAULT '',

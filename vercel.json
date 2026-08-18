@@ -1,0 +1,34 @@
+{
+  "framework": null,
+  "builds": [
+    {
+      "src": "Dockerfile.vercel",
+      "use": "@vercel/container"
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/" }
+  ],
+  "env": {
+    "AUTH_PROVIDER": "localauth",
+    "LOG_DAG_REQUESTS": "true",
+    "LOG_EDGE_REQUESTS": "true",
+    "LOG_NODE_REQUESTS": "true",
+    "LOG_MENU_REQUESTS": "true",
+    "TLS_ENABLED": "false",
+    "TLS_CERT": "",
+    "TLS_KEY": "",
+    "TLS_AUTO_ENABLED": "false",
+    "TLS_AUTO_HOSTS": "",
+    "LDAP_HOST": "",
+    "LDAP_PORT": "389",
+    "LDAP_BASE_DN": "",
+    "LDAP_BIND_DN": "",
+    "LDAP_BIND_PASSWORD": "",
+    "LDAP_USER_FILTER": "",
+    "LDAP_USE_SSL": "false",
+    "OAUTH_HOST": "",
+    "OAUTH_CLIENT_ID": "",
+    "OAUTH_RESPONSE_TYPE": ""
+  }
+}

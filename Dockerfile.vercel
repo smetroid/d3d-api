@@ -14,6 +14,7 @@ RUN apk add --no-cache curl \
 WORKDIR /root/
 COPY --from=builder /app/main .
 COPY samus.tmpl ./samus.tmpl
+ARG CACHEBUST=1
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 EXPOSE 80

@@ -21,6 +21,9 @@ import (
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+// ErrNotFound is returned when a requested record does not exist.
+var ErrNotFound = errors.New("not found")
+
 // Postgres is the d3d-api storage layer, replacing RethinkDB. The full
 // repository surface (DAGs, history, shares, users, nodes, edges, menus)
 // mirrors the method set previously implemented on top of RethinkDB.
@@ -140,6 +143,9 @@ func (p *Postgres) GetDAG(id string) (dag models.Dag, err error) {
 		SELECT id, name, description, diagram, created, updated, public, embed_revision
 		FROM dags WHERE id = $1`, id).Scan(
 		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated, &dag.Public, &dag.EmbedRevision)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Dag{}, ErrNotFound
+	}
 	if diagram != nil {
 		dag.Diagram = *diagram
 	}

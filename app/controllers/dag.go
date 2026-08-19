@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -71,6 +72,9 @@ func (dc *DAGsController) getDAGs(ctx echo.Context) error {
 
 func (dc *DAGsController) getDAG(ctx echo.Context) error {
 	dagResponse, err := dc.DAGService.GetDAG(ctx.Param("dag"))
+	if errors.Is(err, postgres.ErrNotFound) {
+		return ctx.JSON(http.StatusNotFound, models.ErrorResponse("diagram not found"))
+	}
 	return dc.StandardResponse(ctx, dagResponse, err)
 }
 

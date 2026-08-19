@@ -26,6 +26,12 @@ type Dag struct {
 
 	// ClientId is used for WS echo prevention — not persisted to DB.
 	ClientId string `db:"-" json:"clientId,omitempty"`
+
+	// Public controls whether this diagram can be fetched without authentication.
+	Public bool `db:"public" json:"public"`
+
+	// EmbedRevision increments on every content save for cache-busting.
+	EmbedRevision int64 `db:"embed_revision" json:"embedRevision"`
 }
 
 type DagHistory struct {
@@ -48,6 +54,16 @@ type DAGResponse struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	Diagram     string    `json:"diagram"`
+}
+
+// DagPublicResponse is the shape returned by GET /dag/:id/public.
+// It omits owner/ACL fields; only public-safe fields are exposed.
+type DagPublicResponse struct {
+	Status        string `json:"status"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Diagram       string `json:"diagram"`
+	EmbedRevision int64  `json:"embedRevision"`
 }
 
 type DAGsResponse struct {
@@ -77,6 +93,16 @@ func NewDAGsResponse(dags []map[string]interface{}) (dr DAGsResponse) {
 	dr.AutoRefresh = false
 	dr.Total = len(dags)
 	return
+}
+
+func NewDagPublicResponse(dag Dag) DagPublicResponse {
+	return DagPublicResponse{
+		Status:        "ok",
+		Name:          dag.Name,
+		Description:   dag.Description,
+		Diagram:       dag.Diagram,
+		EmbedRevision: dag.EmbedRevision,
+	}
 }
 
 func (dag *Dag) GenerateDefaults() {

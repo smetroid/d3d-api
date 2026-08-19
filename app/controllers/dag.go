@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -36,6 +37,8 @@ func (dc *DAGsController) Init() {
 	dc.Echo.GET("/dag/:dag/ws", dc.dagWS, dc.AuthMiddleware)
 	dc.Echo.GET("/dag/:dag/history", dc.getDAGHistory, dc.AuthMiddleware)
 	dc.Echo.POST("/dag/:dag/history/:historyId/restore", dc.restoreDAGHistory, dc.AuthMiddleware)
+	dc.Echo.PATCH("/dag/:dag", dc.setPublic, dc.AuthMiddleware)
+	dc.Echo.GET("/dag/:dag/public", dc.getDAGPublic)
 }
 
 func (dc *DAGsController) createDAG(ctx echo.Context) error {
@@ -233,4 +236,34 @@ func usernameFromCtx(ctx echo.Context) string {
 	}
 	jti, _ := claims["jti"].(string)
 	return jti
+}
+
+// setPublic toggles the public embed flag for a DAG. Auth required (owner only).
+// Body: {"public": true|false}
+func (dc *DAGsController) setPublic(ctx echo.Context) error {
+	dagId := ctx.Param("dag")
+	var body struct {
+		Public bool `json:"public"`
+	}
+	if err := ctx.Bind(&body); err != nil {
+		return ctx.JSON(http.StatusBadRequest, models.ErrorResponse(err.Error()))
+	}
+	if err := dc.DAGService.SetPublic(dagId, body.Public); err != nil {
+		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+	}
+	return ctx.JSON(http.StatusOK, models.OK_RESPONSE)
+}
+
+// getDAGPublic returns the diagram model if the DAG has Public == true.
+// No authentication required. Returns 404 for non-existent or non-public diagrams.
+func (dc *DAGsController) getDAGPublic(ctx echo.Context) error {
+	dagId := ctx.Param("dag")
+	dag, err := dc.DAGService.GetDAGPublic(dagId)
+	if err != nil {
+		return ctx.JSON(http.StatusNotFound, models.ErrorResponse("not found"))
+	}
+	ctx.Response().Header().Set("ETag", fmt.Sprintf(`"%d"`, dag.EmbedRevision))
+	ctx.Response().Header().Set("Cache-Control", "public, max-age=60, stale-while-revalidate=600")
+	ctx.Response().Header().Set("Access-Control-Allow-Origin", "*")
+	return ctx.JSON(http.StatusOK, models.NewDagPublicResponse(dag))
 }

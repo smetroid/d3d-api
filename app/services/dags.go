@@ -67,3 +67,11 @@ func (ds *DAGService) GetHistory(dagId string) (models.DagHistoryResponse, error
 func (ds *DAGService) RestoreHistory(historyId, dagId string) error {
 	return ds.DB.RestoreHistory(historyId, dagId)
 }
+
+func (ds *DAGService) SetPublic(dagId string, public bool) error {
+	return ds.DB.SetPublic(dagId, public)
+}
+
+func (ds *DAGService) GetDAGPublic(id string) (models.Dag, error) {
+	return ds.DB.GetDAGPublic(id)
+}

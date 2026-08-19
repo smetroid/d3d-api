@@ -137,9 +137,9 @@ func (p *Postgres) GetDAG(id string) (dag models.Dag, err error) {
 	var created, updated *time.Time
 	var diagram *string
 	err = p.pool.QueryRow(context.Background(), `
-		SELECT id, name, description, diagram, created, updated
+		SELECT id, name, description, diagram, created, updated, public, embed_revision
 		FROM dags WHERE id = $1`, id).Scan(
-		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated)
+		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated, &dag.Public, &dag.EmbedRevision)
 	if diagram != nil {
 		dag.Diagram = *diagram
 	}
@@ -157,16 +157,67 @@ func (p *Postgres) DeleteDAG(id string) error {
 	return err
 }
 
-// UpdateDAG merges only the non-zero fields, mirroring RethinkDB's
-// partial-update behavior (gorethink omits empty values on Update).
+// UpdateDAG merges only the non-zero fields. Every content save atomically
+// increments embed_revision so caches can reliably detect stale renders.
 func (p *Postgres) UpdateDAG(id string, updates models.Dag) error {
-	return p.partialUpdate("dags", id, map[string]any{
+	fields := map[string]any{
 		"name":        ifNonZero(updates.Name),
 		"description": ifNonZero(updates.Description),
 		"diagram":     ifNonEmptyJSON(updates.Diagram),
 		"created":     ifNonZeroTime(updates.Created),
 		"updated":     ifNonZeroTime(updates.Updated),
-	})
+	}
+
+	// Build partial SET clause for non-nil fields, then append the atomic bump.
+	var sets []string
+	args := make([]any, 0, len(fields)+1)
+	i := 1
+	for col, val := range fields {
+		if val == nil {
+			continue
+		}
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, i))
+		args = append(args, val)
+		i++
+	}
+	sets = append(sets, "embed_revision = embed_revision + 1")
+	args = append(args, id)
+	_, err := p.pool.Exec(context.Background(),
+		"UPDATE dags SET "+strings.Join(sets, ", ")+" WHERE id = $"+fmt.Sprintf("%d", i),
+		args...)
+	return err
+}
+
+// SetPublic toggles whether a DAG is publicly readable without authentication.
+func (p *Postgres) SetPublic(id string, public bool) error {
+	_, err := p.pool.Exec(context.Background(),
+		`UPDATE dags SET public = $1 WHERE id = $2`, public, id)
+	return err
+}
+
+// GetDAGPublic returns the DAG only when it is marked public; callers should
+// treat any error as "not found or not public" to avoid leaking existence.
+func (p *Postgres) GetDAGPublic(id string) (dag models.Dag, err error) {
+	var diagram *string
+	var created, updated *time.Time
+	err = p.pool.QueryRow(context.Background(), `
+		SELECT id, name, description, diagram, created, updated, embed_revision
+		FROM dags WHERE id = $1 AND public = TRUE`, id).Scan(
+		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated, &dag.EmbedRevision)
+	if err != nil {
+		return
+	}
+	if diagram != nil {
+		dag.Diagram = *diagram
+	}
+	if created != nil {
+		dag.Created = *created
+	}
+	if updated != nil {
+		dag.Updated = *updated
+	}
+	dag.Public = true
+	return
 }
 
 // partialUpdate builds an UPDATE that sets only the non-nil fields.
@@ -196,7 +247,7 @@ func (p *Postgres) partialUpdate(table, id string, fields map[string]any) error 
 
 func (p *Postgres) FindRelatedDAG(dag models.Dag) (relatedDAG models.Dag, foundDAG bool, err error) {
 	return p.findOneDAG(`
-		SELECT id, name, description, diagram, created, updated FROM dags
+		SELECT id, name, description, diagram, created, updated, public, embed_revision FROM dags
 		WHERE name = $1 AND description = $2
 		  AND diagram IS NOT DISTINCT FROM $3::jsonb`,
 		dag.Name, dag.Description, jsonbValue(dag.Diagram))
@@ -206,7 +257,7 @@ func (p *Postgres) findOneDAG(query string, args ...any) (dag models.Dag, foundO
 	var created, updated *time.Time
 	var diagram *string
 	err = p.pool.QueryRow(context.Background(), query, args...).Scan(
-		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated)
+		&dag.Id, &dag.Name, &dag.Description, &diagram, &created, &updated, &dag.Public, &dag.EmbedRevision)
 	if diagram != nil {
 		dag.Diagram = *diagram
 	}

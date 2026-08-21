@@ -110,6 +110,9 @@ func (dc *DAGsController) updateDAG(ctx echo.Context) error {
 
 	dagId := ctx.Param("dag")
 	err = dc.DAGService.UpdateDAG(dagId, dagUpdate)
+	if errors.Is(err, postgres.ErrNotFound) {
+		return ctx.JSON(http.StatusNotFound, models.ErrorResponse("diagram not found"))
+	}
 	if err != nil {
 		return dc.StandardResponse(ctx, models.OK_RESPONSE, err)
 	}

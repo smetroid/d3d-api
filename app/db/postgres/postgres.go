@@ -290,7 +290,7 @@ func (p *Postgres) findOneDAG(query string, args ...any) (dag models.Dag, foundO
 
 func (p *Postgres) GetDAGsSummary(queryArgs map[string][]string) (dagsSummary []map[string]interface{}, err error) {
 	rows, err := p.pool.Query(context.Background(), `
-		SELECT id, name, description, diagram::text AS diagram, created, updated
+		SELECT id::text, name, description, diagram::text AS diagram, created, updated
 		FROM dags`)
 	if err != nil {
 		return

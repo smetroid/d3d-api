@@ -162,6 +162,9 @@ func (p *Postgres) GetDAG(id string) (dag models.Dag, err error) {
 }
 
 func (p *Postgres) DeleteDAG(id string) error {
+	if _, parseErr := uuid.Parse(id); parseErr != nil {
+		return ErrNotFound
+	}
 	_, err := p.pool.Exec(context.Background(), `DELETE FROM dags WHERE id = $1`, id)
 	return err
 }
@@ -169,6 +172,9 @@ func (p *Postgres) DeleteDAG(id string) error {
 // UpdateDAG merges only the non-zero fields. Every content save atomically
 // increments embed_revision so caches can reliably detect stale renders.
 func (p *Postgres) UpdateDAG(id string, updates models.Dag) error {
+	if _, parseErr := uuid.Parse(id); parseErr != nil {
+		return ErrNotFound
+	}
 	fields := map[string]any{
 		"name":        ifNonZero(updates.Name),
 		"description": ifNonZero(updates.Description),
@@ -738,6 +744,9 @@ func (p *Postgres) UpdateUserPassword(username, passwordHash string) error {
 const historyLimit = 50
 
 func (p *Postgres) AppendHistory(dagId, snapshotJSON, savedBy string) error {
+	if _, parseErr := uuid.Parse(dagId); parseErr != nil {
+		return ErrNotFound
+	}
 	_, err := p.pool.Exec(context.Background(), `
 		INSERT INTO dag_history (id, dag_id, snapshot_json, saved_by, saved_at)
 		VALUES ($1, $2, $3, $4, $5)`,

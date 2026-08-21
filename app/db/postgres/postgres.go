@@ -137,6 +137,9 @@ func (p *Postgres) CreateDAGs(dags []models.Dag) (ids []string, err error) {
 }
 
 func (p *Postgres) GetDAG(id string) (dag models.Dag, err error) {
+	if _, parseErr := uuid.Parse(id); parseErr != nil {
+		return models.Dag{}, ErrNotFound
+	}
 	var created, updated *time.Time
 	var diagram *string
 	err = p.pool.QueryRow(context.Background(), `
@@ -204,6 +207,9 @@ func (p *Postgres) SetPublic(id string, public bool) error {
 // GetDAGPublic returns the DAG only when it is marked public; callers should
 // treat any error as "not found or not public" to avoid leaking existence.
 func (p *Postgres) GetDAGPublic(id string) (dag models.Dag, err error) {
+	if _, parseErr := uuid.Parse(id); parseErr != nil {
+		return models.Dag{}, ErrNotFound
+	}
 	var diagram *string
 	var created, updated *time.Time
 	err = p.pool.QueryRow(context.Background(), `

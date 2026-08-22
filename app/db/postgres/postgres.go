@@ -889,3 +889,132 @@ func (p *Postgres) RestoreHistory(historyId, dagId string) error {
 	}
 	return p.UpdateDAG(dagId, models.Dag{Diagram: snapshotJSON})
 }
+
+// ─── Companies ───────────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateCompany(c models.Company) (string, error) {
+	if c.Id == "" {
+		c.Id = uuid.New().String()
+	}
+	ctx := context.Background()
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO companies (id, name, created_by, created_at)
+		VALUES ($1, $2, $3, $4)`,
+		c.Id, c.Name, c.CreatedBy, c.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	// Creator is automatically a member.
+	if err := p.AddMembership(models.Membership{UserId: c.CreatedBy, CompanyId: c.Id}); err != nil {
+		return "", err
+	}
+	return c.Id, nil
+}
+
+func (p *Postgres) GetCompany(id string) (models.Company, error) {
+	var c models.Company
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, name, created_by, created_at FROM companies WHERE id = $1`, id).Scan(
+		&c.Id, &c.Name, &c.CreatedBy, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Company{}, ErrNotFound
+	}
+	return c, err
+}
+
+func (p *Postgres) ListCompaniesForUser(username string) ([]models.Company, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT c.id, c.name, c.created_by, c.created_at
+		FROM companies c
+		JOIN memberships m ON m.company_id = c.id
+		WHERE m.user_id = $1
+		ORDER BY c.created_at DESC`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var companies []models.Company
+	for rows.Next() {
+		var c models.Company
+		if err := rows.Scan(&c.Id, &c.Name, &c.CreatedBy, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		companies = append(companies, c)
+	}
+	if companies == nil {
+		companies = []models.Company{}
+	}
+	return companies, rows.Err()
+}
+
+func (p *Postgres) DeleteCompany(id string) error {
+	_, err := p.pool.Exec(context.Background(), `DELETE FROM companies WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) GetCompanyMembers(companyId string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT user_id FROM memberships WHERE company_id = $1 ORDER BY user_id`, companyId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		members = append(members, uid)
+	}
+	if members == nil {
+		members = []string{}
+	}
+	return members, rows.Err()
+}
+
+// ─── Memberships ─────────────────────────────────────────────────────────────
+
+func (p *Postgres) AddMembership(m models.Membership) error {
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO memberships (user_id, company_id) VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`, m.UserId, m.CompanyId)
+	return err
+}
+
+func (p *Postgres) RemoveMembership(userId, companyId string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		DELETE FROM memberships WHERE user_id = $1 AND company_id = $2`, userId, companyId)
+	return err
+}
+
+func (p *Postgres) IsMember(userId, companyId string) (bool, error) {
+	var exists bool
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT EXISTS (SELECT 1 FROM memberships WHERE user_id = $1 AND company_id = $2)`,
+		userId, companyId).Scan(&exists)
+	return exists, err
+}
+
+// GetUserCompanyIds returns all company IDs the user belongs to.
+// Used for share audience resolution.
+func (p *Postgres) GetUserCompanyIds(username string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT company_id FROM memberships WHERE user_id = $1`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}

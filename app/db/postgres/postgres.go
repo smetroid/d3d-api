@@ -1018,3 +1018,147 @@ func (p *Postgres) GetUserCompanyIds(username string) ([]string, error) {
 	}
 	return ids, rows.Err()
 }
+
+// ─── Groups ──────────────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateGroup(g models.Group) (string, error) {
+	if g.Id == "" {
+		g.Id = uuid.New().String()
+	}
+	var extRef *string
+	if g.ExternalRef != "" {
+		extRef = &g.ExternalRef
+	}
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO user_groups (id, name, company_id, external_ref, created_at)
+		VALUES ($1, $2, $3, $4, $5)`,
+		g.Id, g.Name, g.CompanyId, extRef, g.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	return g.Id, nil
+}
+
+func (p *Postgres) GetGroup(id string) (models.Group, error) {
+	var g models.Group
+	var extRef *string
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, name, company_id, external_ref, created_at
+		FROM user_groups WHERE id = $1`, id).Scan(
+		&g.Id, &g.Name, &g.CompanyId, &extRef, &g.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Group{}, ErrNotFound
+	}
+	if extRef != nil {
+		g.ExternalRef = *extRef
+	}
+	return g, err
+}
+
+func (p *Postgres) ListGroupsByCompany(companyId string) ([]models.Group, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT id, name, company_id, external_ref, created_at
+		FROM user_groups WHERE company_id = $1
+		ORDER BY created_at DESC`, companyId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var groups []models.Group
+	for rows.Next() {
+		var g models.Group
+		var extRef *string
+		if err := rows.Scan(&g.Id, &g.Name, &g.CompanyId, &extRef, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		if extRef != nil {
+			g.ExternalRef = *extRef
+		}
+		groups = append(groups, g)
+	}
+	if groups == nil {
+		groups = []models.Group{}
+	}
+	return groups, rows.Err()
+}
+
+func (p *Postgres) DeleteGroup(id string) error {
+	_, err := p.pool.Exec(context.Background(), `DELETE FROM user_groups WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) GetGroupMembers(groupId string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY user_id`, groupId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		members = append(members, uid)
+	}
+	if members == nil {
+		members = []string{}
+	}
+	return members, rows.Err()
+}
+
+// ─── Group members ────────────────────────────────────────────────────────────
+
+func (p *Postgres) AddGroupMember(gm models.GroupMember) error {
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`, gm.GroupId, gm.UserId)
+	return err
+}
+
+func (p *Postgres) RemoveGroupMember(groupId, userId string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, groupId, userId)
+	return err
+}
+
+// GetUserGroupIds returns all group IDs the user belongs to.
+// Used for share audience resolution.
+func (p *Postgres) GetUserGroupIds(username string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT group_id FROM group_members WHERE user_id = $1`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}
+
+// UpsertGroupByExternalRef creates or updates a group keyed by (companyId,
+// externalRef). Returns the group ID. Used by LDAP login to sync AD groups.
+func (p *Postgres) UpsertGroupByExternalRef(g models.Group) (string, error) {
+	if g.Id == "" {
+		g.Id = uuid.New().String()
+	}
+	var id string
+	err := p.pool.QueryRow(context.Background(), `
+		INSERT INTO user_groups (id, name, company_id, external_ref, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (company_id, external_ref) WHERE external_ref IS NOT NULL
+		DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`,
+		g.Id, g.Name, g.CompanyId, g.ExternalRef, g.CreatedAt).Scan(&id)
+	return id, err
+}

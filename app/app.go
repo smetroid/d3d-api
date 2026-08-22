@@ -124,12 +124,19 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		AuthMiddleware: authMiddleware,
 	}
 
+	groupsController := controllers.GroupsController{
+		Echo:           e,
+		DB:             db,
+		AuthMiddleware: authMiddleware,
+	}
+
 	dagController.Init()
 	edgeController.Init()
 	nodeController.Init()
 	menuController.Init()
 	sharesController.Init()
 	companiesController.Init()
+	groupsController.Init()
 
 	// Route => handler
 	/*

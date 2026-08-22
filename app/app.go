@@ -170,6 +170,9 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvider) {
 	switch config.Samus.AuthProvider {
 	case "ldap":
+		if config.Ldap.LDAPCompanyId != "" {
+			config.Ldap.DB = &config.Postgres
+		}
 		authProvider = &config.Ldap
 	case "oauth":
 		authProvider = &config.OAuth

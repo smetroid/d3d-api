@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -24,12 +26,74 @@ var embedMigrations embed.FS
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("not found")
 
+const (
+	defaultDSN      = "postgres://localhost:5432/samus"
+	defaultAddress  = "localhost:5432"
+	defaultDatabase = "samus"
+)
+
 // Postgres is the d3d-api storage layer, replacing RethinkDB. The full
 // repository surface (DAGs, history, shares, users, nodes, edges, menus)
 // mirrors the method set previously implemented on top of RethinkDB.
+//
+// Connection settings can be given either as a single `dsn` or as discrete
+// fields (`address`, `user`, `password`, `database`, `ssl_mode`); the latter
+// avoids URL-escaping passwords in templated configs. A non-empty DSN wins.
 type Postgres struct {
-	DSN  string `toml:"dsn"`
-	pool *pgxpool.Pool
+	DSN      string `toml:"dsn"`
+	Address  string `toml:"address"`
+	User     string `toml:"user"`
+	Password string `toml:"password"`
+	Database string `toml:"database"`
+	SSLMode  string `toml:"ssl_mode"`
+	pool     *pgxpool.Pool
+}
+
+// Configured reports whether any connection setting was provided.
+func (p Postgres) Configured() bool {
+	return p.DSN != "" || p.Address != "" || p.User != "" || p.Password != "" || p.Database != ""
+}
+
+// EffectiveDSN returns the connection string the storage layer connects with:
+// the configured DSN verbatim, a DSN assembled from the discrete fields, or
+// the local development default when nothing is configured.
+func (p Postgres) EffectiveDSN() string {
+	if p.DSN != "" {
+		return p.DSN
+	}
+
+	address := p.Address
+	if address == "" {
+		address = defaultAddress
+	}
+	host, port := splitHostPort(address)
+
+	database := p.Database
+	if database == "" {
+		database = defaultDatabase
+	}
+
+	u := url.URL{
+		Scheme: "postgres",
+		Host:   joinHostPort(host, port),
+		Path:   "/" + database,
+	}
+	switch {
+	case p.User != "" && p.Password != "":
+		u.User = url.UserPassword(p.User, p.Password)
+	case p.User != "":
+		u.User = url.User(p.User)
+	case p.Password != "":
+		u.User = url.UserPassword("", p.Password)
+	}
+	params := url.Values{}
+	if p.SSLMode != "" {
+		params.Set("sslmode", p.SSLMode)
+	}
+	if len(params) > 0 {
+		u.RawQuery = params.Encode()
+	}
+	return u.String()
 }
 
 // Pool returns the open connection pool. It is nil until Init succeeds.
@@ -40,9 +104,7 @@ func (p *Postgres) Init() error {
 	if p.pool != nil {
 		return nil
 	}
-	if p.DSN == "" {
-		p.DSN = "postgres://localhost:5432/samus"
-	}
+	p.DSN = p.EffectiveDSN()
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, p.DSN)
@@ -65,6 +127,21 @@ func (p *Postgres) Init() error {
 		return err
 	}
 	return db.Close()
+}
+
+// splitHostPort splits "host:port"; a bare host keeps the Postgres default
+// port by returning an empty port part.
+func splitHostPort(address string) (host, port string) {
+	host, port, _ = strings.Cut(address, ":")
+	return host, port
+}
+
+// joinHostPort formats host:port, bracketing IPv6 literals.
+func joinHostPort(host, port string) string {
+	if port == "" {
+		port = "5432"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // jsonbValue returns nil for empty strings so empty payloads store as NULL

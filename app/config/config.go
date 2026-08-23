@@ -15,6 +15,10 @@ type SamusConfig struct {
 	Ldap     ldap.LDAPAuthProvider
 	OAuth    oauth.OAuthAuthProvider
 	Postgres postgres.Postgres
+
+	// PostgreSQL is an alias section ([postgresql]) accepted for configs
+	// that spell out discrete connection fields; see mergePostgresConfig.
+	PostgreSQL postgres.Postgres `toml:"postgresql"`
 }
 
 type samus struct {
@@ -39,8 +43,18 @@ func BuildConfig(configFile string) (config SamusConfig) {
 		log.Fatal("config file error: " + err.Error())
 	}
 
+	mergePostgresConfig(&config)
 	setDefaultConfigs(&config)
 	return
+}
+
+// mergePostgresConfig lets a [postgresql] section stand in for [postgres].
+// An explicitly configured [postgres] block always wins.
+func mergePostgresConfig(config *SamusConfig) {
+	if !config.Postgres.Configured() && config.PostgreSQL.Configured() {
+		config.Postgres = config.PostgreSQL
+	}
+	config.PostgreSQL = postgres.Postgres{}
 }
 
 func setDefaultConfigs(config *SamusConfig) {

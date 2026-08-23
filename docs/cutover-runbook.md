@@ -101,7 +101,8 @@ nodes: table does not exist in RethinkDB, skipping
        dsn = "<postgres-dsn>"
    ```
 
-   For Fly.io, render this from `samus.tmpl` and `POSTGRES_DSN` (see README → Deployment).
+    For container deployments, render this from `samus.tmpl` and `POSTGRES_DSN`
+    (see README → Deployment).
 2. Deploy. `Postgres.Init()` applies any pending goose migrations on startup.
 3. Smoke-test the same endpoints from Step 4 against the new deployment.
 

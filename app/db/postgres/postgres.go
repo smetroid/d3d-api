@@ -1252,3 +1252,51 @@ func (p *Postgres) AppendImportedBy(id, username string) error {
 		WHERE id = $1 AND NOT ($2 = ANY(imported_by))`, id, username)
 	return err
 }
+
+func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string) ([]models.ElementShareSummary, error) {
+	if companyIds == nil {
+		companyIds = []string{}
+	}
+	if groupIds == nil {
+		groupIds = []string{}
+	}
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT id, type, root_ids, audience_kind, role, created_by,
+		       source_dag_id, expires_at, catalog, tags, created_at
+		FROM element_shares
+		WHERE revoked = FALSE
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		  AND created_by != $1
+		  AND (
+		    audience_kind = 'public'
+		    OR (audience_kind = 'user'    AND $1 = ANY(audience_ids))
+		    OR (audience_kind = 'company' AND audience_ids && $2::text[])
+		    OR (audience_kind = 'group'   AND audience_ids && $3::text[])
+		  )
+		ORDER BY created_at DESC`, caller, companyIds, groupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.ElementShareSummary
+	for rows.Next() {
+		var s models.ElementShareSummary
+		var sourceDagId *string
+		var expiresAt *time.Time
+		if err := rows.Scan(
+			&s.Id, &s.Type, &s.RootIds, &s.AudienceKind, &s.Role, &s.CreatedBy,
+			&sourceDagId, &expiresAt, &s.Catalog, &s.Tags, &s.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if sourceDagId != nil {
+			s.SourceDagId = *sourceDagId
+		}
+		if expiresAt != nil {
+			s.ExpiresAt = *expiresAt
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}

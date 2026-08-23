@@ -37,7 +37,8 @@ func newTestPostgres(t *testing.T) *Postgres {
 func truncateAll(t *testing.T, p *Postgres) {
 	t.Helper()
 	_, err := p.Pool().Exec(context.Background(), `
-		TRUNCATE dag_history, shares, share_denylist, users, menus, edges, nodes, dags CASCADE`)
+		TRUNCATE dag_history, shares, share_denylist, users, menus, edges, nodes, dags,
+		         element_shares, group_members, user_groups, memberships, companies CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -631,5 +632,121 @@ func TestPostgres_UserCRUD(t *testing.T) {
 	// Username is unique.
 	if err := p.CreateUser(models.User{Username: "alice", PasswordHash: "other"}); err == nil {
 		t.Error("expected unique constraint violation for duplicate username")
+	}
+}
+
+// ─── Element Shares ──────────────────────────────────────────────────────────
+
+func TestPostgres_ListInboxShares(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	makeShare := func(kind string, audienceIds []string, createdBy string, revoked bool, expiresAt time.Time) string {
+		t.Helper()
+		s := models.ElementShare{
+			Type:         "node",
+			RootIds:      []string{"n1"},
+			Cluster:      `{"nodes":[],"edges":[]}`,
+			AudienceKind: kind,
+			AudienceIds:  audienceIds,
+			Role:         "view",
+			CreatedBy:    createdBy,
+			Revoked:      revoked,
+			Tags:         []string{},
+			ImportedBy:   []string{},
+			CreatedAt:    now,
+			ExpiresAt:    expiresAt,
+		}
+		id, err := p.CreateElementShare(s)
+		if err != nil {
+			t.Fatalf("CreateElementShare: %v", err)
+		}
+		return id
+	}
+
+	// Set up company and group that alice belongs to.
+	coID, err := p.CreateCompany(models.Company{Name: "acme", CreatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AddMembership(models.Membership{UserId: "alice", CompanyId: coID}); err != nil {
+		t.Fatal(err)
+	}
+	grpID, err := p.CreateGroup(models.Group{Name: "eng", CompanyId: coID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AddGroupMember(models.GroupMember{GroupId: grpID, UserId: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	aliceCompanyIds := []string{coID}
+	aliceGroupIds := []string{grpID}
+
+	// Shares that MUST appear in alice's inbox.
+	wantPublic  := makeShare("public",  nil,              "bob", false, time.Time{})
+	wantUser    := makeShare("user",    []string{"alice"}, "bob", false, time.Time{})
+	wantCompany := makeShare("company", []string{coID},   "bob", false, time.Time{})
+	wantGroup   := makeShare("group",   []string{grpID},  "bob", false, time.Time{})
+
+	// Shares that must NOT appear.
+	makeShare("public",  nil,               "alice", false, time.Time{})           // own share
+	makeShare("user",    []string{"carol"},  "bob",  false, time.Time{})           // different user
+	makeShare("company", []string{"other"},  "bob",  false, time.Time{})           // different company
+	makeShare("group",   []string{"other"},  "bob",  false, time.Time{})           // different group
+	makeShare("public",  nil,               "bob",  true,  time.Time{})            // revoked
+	makeShare("public",  nil,               "bob",  false, now.Add(-time.Hour))    // expired
+
+	shares, err := p.ListInboxShares("alice", aliceCompanyIds, aliceGroupIds)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]bool, len(shares))
+	for _, s := range shares {
+		got[s.Id] = true
+	}
+
+	for _, wantID := range []string{wantPublic, wantUser, wantCompany, wantGroup} {
+		if !got[wantID] {
+			t.Errorf("share %s missing from inbox", wantID)
+		}
+	}
+	if len(shares) != 4 {
+		t.Errorf("expected 4 inbox shares, got %d", len(shares))
+	}
+}
+
+// ListInboxShares with empty company/group slices must not return company- or
+// group-scoped shares, and must not error.
+func TestPostgres_ListInboxShares_NoMemberships(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	makeShare := func(kind string, audienceIds []string) string {
+		t.Helper()
+		id, err := p.CreateElementShare(models.ElementShare{
+			Type: "node", RootIds: []string{"n1"}, Cluster: `{"nodes":[],"edges":[]}`,
+			AudienceKind: kind, AudienceIds: audienceIds,
+			Role: "view", CreatedBy: "bob",
+			Tags: []string{}, ImportedBy: []string{}, CreatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("CreateElementShare: %v", err)
+		}
+		return id
+	}
+
+	publicID := makeShare("public", nil)
+	makeShare("company", []string{"some-co"})
+	makeShare("group", []string{"some-grp"})
+
+	shares, err := p.ListInboxShares("alice", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shares) != 1 || shares[0].Id != publicID {
+		t.Errorf("expected only the public share, got %d shares", len(shares))
 	}
 }

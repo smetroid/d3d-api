@@ -34,7 +34,7 @@ type GroupMember struct {
 }
 
 // ElementShare is a snapshot share of a node/edge/cluster subgraph.
-// Cluster contains the serialised graphlib subgraph JSON: {nodes:[…], edges:[…]}.
+// Cluster contains the serialized graphlib subgraph JSON: {nodes:[…], edges:[…]}.
 // Jti is only populated for public link shares (audience_kind = "public") and
 // is used for the same denylist revocation flow as diagram share links.
 type ElementShare struct {
@@ -65,7 +65,7 @@ type AudienceSpec struct {
 
 // CreateElementShareRequest is the body for POST /dag/:dag/elements/shares.
 // Depth controls the cluster closure: 0 = element+descendants only,
-// 1 = +1 hop neighbours, nil = whole connected component.
+// 1 = +1 hop neighbors, nil = whole connected component.
 type CreateElementShareRequest struct {
 	RootIds  []string     `json:"rootIds"`
 	Depth    *int         `json:"depth"`

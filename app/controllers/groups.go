@@ -202,12 +202,10 @@ func (gc *GroupsController) deleteGroup(ctx echo.Context) error {
 func (gc *GroupsController) requireGroupOrCompanyOwner(ctx echo.Context, caller string, g models.Group) error {
 	company, err := gc.DB.GetCompany(g.CompanyId)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
-		return err
+		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
 	}
 	if caller != company.CreatedBy {
-		ctx.JSON(http.StatusForbidden, models.ErrorResponse("only the group or company owner can perform this action"))
-		return echo.ErrForbidden
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("only the group or company owner can perform this action"))
 	}
 	return nil
 }

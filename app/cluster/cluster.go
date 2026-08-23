@@ -29,8 +29,8 @@ type Subgraph struct {
 type graphIndex struct {
 	nodeMap  map[string]Node     // v → Node
 	children map[string][]string // parentV → []childV
-	adjOut   map[string][]string // v → out-neighbour IDs
-	adjIn    map[string][]string // v → in-neighbour IDs
+	adjOut   map[string][]string // v → out-neighbor IDs
+	adjIn    map[string][]string // v → in-neighbor IDs
 	edges    []Edge
 }
 
@@ -81,7 +81,7 @@ func addAncestors(nodeId string, idx graphIndex, included map[string]bool) {
 // Compute returns the subgraph closure for the given rootIds.
 //
 // depth 0  — root nodes + descendants (compound children, recursively)
-// depth N  — + N hops of edge-connected neighbours and their descendants
+// depth N  — + N hops of edge-connected neighbors and their descendants
 // depth -1 — entire connected component(s) containing the roots
 //
 // In all cases: parent container nodes of any included node are also included,

@@ -78,7 +78,7 @@ func TestCompute_Depth1_OneHopNeighbours(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := nodeIDs(sg)
-	// n1 (seed), root (in-neighbour + compound parent of child1/child2), n2 (out-neighbour)
+	// n1 (seed), root (in-neighbor + compound parent of child1/child2), n2 (out-neighbor)
 	for _, want := range []string{"n1", "root", "child1", "child2", "n2"} {
 		if !ids[want] {
 			t.Errorf("depth 1: expected %q in subgraph", want)

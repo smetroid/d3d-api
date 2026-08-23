@@ -44,6 +44,19 @@ Copy `samus_dev.toml` as your local config (it is gitignored):
     dsn = "postgres://postgres:postgres@localhost:5432/samus?sslmode=disable"
 ```
 
+Alternatively, spell out the connection as discrete fields under `[postgresql]`
+(a DSN is assembled for you, with the password properly escaped):
+
+```toml
+[postgresql]
+    address  = "localhost:5432"
+    user     = "samus"
+    password = "dev-password-change-in-prod"
+    database = "samus"
+```
+
+A non-empty `dsn` always wins when both forms are present.
+
 ### 3. Create the first user
 
 `localauth` stores bcrypt hashed users in the `users` table:
@@ -188,7 +201,7 @@ For the full step-by-step production cutover (freeze, preflight, migrate, verify
 
 ## Deployment
 
-The repo includes a `Dockerfile` and `fly.toml` for [Fly.io](https://fly.io) deployment. The image runs the API binary, which reads its config from `./samus.toml` (or the path given by `--config`). Provide a `samus.toml` with a `[postgres] dsn` pointing at your Postgres instance; `samus.tmpl` is an env-substitution template for rendering that config from environment variables (e.g. `POSTGRES_DSN`). CI is required to pass before deploy.
+The image runs the API binary, which reads its config from `./samus.toml` (or the path given by `--config`). Provide a `samus.toml` with a `[postgres] dsn` (or a discrete `[postgresql]` block) pointing at your Postgres instance; `samus.tmpl` is an env-substitution template for rendering that config from environment variables (e.g. `POSTGRES_DSN`). CI is required to pass before deploy.
 
 ## CI/CD
 

@@ -1169,6 +1169,18 @@ func (p *Postgres) CreateElementShare(s models.ElementShare) (string, error) {
 	if s.Id == "" {
 		s.Id = uuid.New().String()
 	}
+	if s.AudienceIds == nil {
+		s.AudienceIds = []string{}
+	}
+	if s.RootIds == nil {
+		s.RootIds = []string{}
+	}
+	if s.Tags == nil {
+		s.Tags = []string{}
+	}
+	if s.ImportedBy == nil {
+		s.ImportedBy = []string{}
+	}
 	var jti *string
 	if s.Jti != "" {
 		jti = &s.Jti

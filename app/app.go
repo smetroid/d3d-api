@@ -118,11 +118,25 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		AuthMiddleware: authMiddleware,
 	}
 
+	companiesController := controllers.CompaniesController{
+		Echo:           e,
+		DB:             db,
+		AuthMiddleware: authMiddleware,
+	}
+
+	groupsController := controllers.GroupsController{
+		Echo:           e,
+		DB:             db,
+		AuthMiddleware: authMiddleware,
+	}
+
 	dagController.Init()
 	edgeController.Init()
 	nodeController.Init()
 	menuController.Init()
 	sharesController.Init()
+	companiesController.Init()
+	groupsController.Init()
 
 	// Route => handler
 	/*
@@ -156,6 +170,9 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 func BuildAuthProvider(config config.SamusConfig) (authProvider auth.AuthProvider) {
 	switch config.Samus.AuthProvider {
 	case "ldap":
+		if config.Ldap.LDAPCompanyId != "" {
+			config.Ldap.DB = &config.Postgres
+		}
 		authProvider = &config.Ldap
 	case "oauth":
 		authProvider = &config.OAuth

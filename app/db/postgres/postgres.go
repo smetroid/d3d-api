@@ -889,3 +889,426 @@ func (p *Postgres) RestoreHistory(historyId, dagId string) error {
 	}
 	return p.UpdateDAG(dagId, models.Dag{Diagram: snapshotJSON})
 }
+
+// ─── Companies ───────────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateCompany(c models.Company) (string, error) {
+	if c.Id == "" {
+		c.Id = uuid.New().String()
+	}
+	ctx := context.Background()
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO companies (id, name, created_by, created_at)
+		VALUES ($1, $2, $3, $4)`,
+		c.Id, c.Name, c.CreatedBy, c.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	// Creator is automatically a member.
+	if err := p.AddMembership(models.Membership{UserId: c.CreatedBy, CompanyId: c.Id}); err != nil {
+		return "", err
+	}
+	return c.Id, nil
+}
+
+func (p *Postgres) GetCompany(id string) (models.Company, error) {
+	var c models.Company
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, name, created_by, created_at FROM companies WHERE id = $1`, id).Scan(
+		&c.Id, &c.Name, &c.CreatedBy, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Company{}, ErrNotFound
+	}
+	return c, err
+}
+
+func (p *Postgres) ListCompaniesForUser(username string) ([]models.Company, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT c.id, c.name, c.created_by, c.created_at
+		FROM companies c
+		JOIN memberships m ON m.company_id = c.id
+		WHERE m.user_id = $1
+		ORDER BY c.created_at DESC`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var companies []models.Company
+	for rows.Next() {
+		var c models.Company
+		if err := rows.Scan(&c.Id, &c.Name, &c.CreatedBy, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		companies = append(companies, c)
+	}
+	if companies == nil {
+		companies = []models.Company{}
+	}
+	return companies, rows.Err()
+}
+
+func (p *Postgres) DeleteCompany(id string) error {
+	_, err := p.pool.Exec(context.Background(), `DELETE FROM companies WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) GetCompanyMembers(companyId string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT user_id FROM memberships WHERE company_id = $1 ORDER BY user_id`, companyId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		members = append(members, uid)
+	}
+	if members == nil {
+		members = []string{}
+	}
+	return members, rows.Err()
+}
+
+// ─── Memberships ─────────────────────────────────────────────────────────────
+
+func (p *Postgres) AddMembership(m models.Membership) error {
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO memberships (user_id, company_id) VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`, m.UserId, m.CompanyId)
+	return err
+}
+
+func (p *Postgres) RemoveMembership(userId, companyId string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		DELETE FROM memberships WHERE user_id = $1 AND company_id = $2`, userId, companyId)
+	return err
+}
+
+func (p *Postgres) IsMember(userId, companyId string) (bool, error) {
+	var exists bool
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT EXISTS (SELECT 1 FROM memberships WHERE user_id = $1 AND company_id = $2)`,
+		userId, companyId).Scan(&exists)
+	return exists, err
+}
+
+// GetUserCompanyIds returns all company IDs the user belongs to.
+// Used for share audience resolution.
+func (p *Postgres) GetUserCompanyIds(username string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT company_id FROM memberships WHERE user_id = $1`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}
+
+// ─── Groups ──────────────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateGroup(g models.Group) (string, error) {
+	if g.Id == "" {
+		g.Id = uuid.New().String()
+	}
+	var extRef *string
+	if g.ExternalRef != "" {
+		extRef = &g.ExternalRef
+	}
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO user_groups (id, name, company_id, external_ref, created_at)
+		VALUES ($1, $2, $3, $4, $5)`,
+		g.Id, g.Name, g.CompanyId, extRef, g.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	return g.Id, nil
+}
+
+func (p *Postgres) GetGroup(id string) (models.Group, error) {
+	var g models.Group
+	var extRef *string
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, name, company_id, external_ref, created_at
+		FROM user_groups WHERE id = $1`, id).Scan(
+		&g.Id, &g.Name, &g.CompanyId, &extRef, &g.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Group{}, ErrNotFound
+	}
+	if extRef != nil {
+		g.ExternalRef = *extRef
+	}
+	return g, err
+}
+
+func (p *Postgres) ListGroupsByCompany(companyId string) ([]models.Group, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT id, name, company_id, external_ref, created_at
+		FROM user_groups WHERE company_id = $1
+		ORDER BY created_at DESC`, companyId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var groups []models.Group
+	for rows.Next() {
+		var g models.Group
+		var extRef *string
+		if err := rows.Scan(&g.Id, &g.Name, &g.CompanyId, &extRef, &g.CreatedAt); err != nil {
+			return nil, err
+		}
+		if extRef != nil {
+			g.ExternalRef = *extRef
+		}
+		groups = append(groups, g)
+	}
+	if groups == nil {
+		groups = []models.Group{}
+	}
+	return groups, rows.Err()
+}
+
+func (p *Postgres) DeleteGroup(id string) error {
+	_, err := p.pool.Exec(context.Background(), `DELETE FROM user_groups WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) GetGroupMembers(groupId string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY user_id`, groupId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []string
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		members = append(members, uid)
+	}
+	if members == nil {
+		members = []string{}
+	}
+	return members, rows.Err()
+}
+
+// ─── Group members ────────────────────────────────────────────────────────────
+
+func (p *Postgres) AddGroupMember(gm models.GroupMember) error {
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`, gm.GroupId, gm.UserId)
+	return err
+}
+
+func (p *Postgres) RemoveGroupMember(groupId, userId string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, groupId, userId)
+	return err
+}
+
+// GetUserGroupIds returns all group IDs the user belongs to.
+// Used for share audience resolution.
+func (p *Postgres) GetUserGroupIds(username string) ([]string, error) {
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT group_id FROM group_members WHERE user_id = $1`, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}
+
+// UpsertGroupByExternalRef creates or updates a group keyed by (companyId,
+// externalRef). Returns the group ID. Used by LDAP login to sync AD groups.
+func (p *Postgres) UpsertGroupByExternalRef(g models.Group) (string, error) {
+	if g.Id == "" {
+		g.Id = uuid.New().String()
+	}
+	var id string
+	err := p.pool.QueryRow(context.Background(), `
+		INSERT INTO user_groups (id, name, company_id, external_ref, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (company_id, external_ref) WHERE external_ref IS NOT NULL
+		DO UPDATE SET name = EXCLUDED.name
+		RETURNING id`,
+		g.Id, g.Name, g.CompanyId, g.ExternalRef, g.CreatedAt).Scan(&id)
+	return id, err
+}
+
+// ─── Element Shares ───────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateElementShare(s models.ElementShare) (string, error) {
+	if s.Id == "" {
+		s.Id = uuid.New().String()
+	}
+	if s.AudienceIds == nil {
+		s.AudienceIds = []string{}
+	}
+	if s.RootIds == nil {
+		s.RootIds = []string{}
+	}
+	if s.Tags == nil {
+		s.Tags = []string{}
+	}
+	if s.ImportedBy == nil {
+		s.ImportedBy = []string{}
+	}
+	var jti *string
+	if s.Jti != "" {
+		jti = &s.Jti
+	}
+	var sourceDagId *string
+	if s.SourceDagId != "" {
+		sourceDagId = &s.SourceDagId
+	}
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO element_shares (
+			id, type, root_ids, cluster, audience_kind, audience_ids,
+			role, created_by, source_dag_id, expires_at, revoked,
+			catalog, tags, imported_by, jti, anon_name, created_at
+		) VALUES (
+			$1, $2, $3, $4::jsonb, $5, $6,
+			$7, $8, $9, $10, $11,
+			$12, $13, $14, $15, $16, $17
+		)`,
+		s.Id, s.Type, s.RootIds, jsonbValue(s.Cluster), s.AudienceKind, s.AudienceIds,
+		s.Role, s.CreatedBy, sourceDagId, timeOrNil(s.ExpiresAt), s.Revoked,
+		s.Catalog, s.Tags, s.ImportedBy, jti, s.AnonName, s.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	return s.Id, nil
+}
+
+func (p *Postgres) GetElementShare(id string) (models.ElementShare, error) {
+	var s models.ElementShare
+	var jti, sourceDagId *string
+	var expiresAt *time.Time
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, type, root_ids, cluster::text, audience_kind, audience_ids,
+		       role, created_by, source_dag_id, expires_at, revoked,
+		       catalog, tags, imported_by, jti, anon_name, created_at
+		FROM element_shares WHERE id = $1`, id).Scan(
+		&s.Id, &s.Type, &s.RootIds, &s.Cluster, &s.AudienceKind, &s.AudienceIds,
+		&s.Role, &s.CreatedBy, &sourceDagId, &expiresAt, &s.Revoked,
+		&s.Catalog, &s.Tags, &s.ImportedBy, &jti, &s.AnonName, &s.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.ElementShare{}, ErrNotFound
+	}
+	if err != nil {
+		return models.ElementShare{}, err
+	}
+	if jti != nil {
+		s.Jti = *jti
+	}
+	if sourceDagId != nil {
+		s.SourceDagId = *sourceDagId
+	}
+	if expiresAt != nil {
+		s.ExpiresAt = *expiresAt
+	}
+	return s, nil
+}
+
+func (p *Postgres) GetElementShareByJti(jti string) (models.ElementShare, error) {
+	var id string
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id FROM element_shares WHERE jti = $1`, jti).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.ElementShare{}, ErrNotFound
+	}
+	if err != nil {
+		return models.ElementShare{}, err
+	}
+	return p.GetElementShare(id)
+}
+
+func (p *Postgres) RevokeElementShare(id string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		UPDATE element_shares SET revoked = TRUE WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) AppendImportedBy(id, username string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		UPDATE element_shares
+		SET imported_by = array_append(imported_by, $2)
+		WHERE id = $1 AND NOT ($2 = ANY(imported_by))`, id, username)
+	return err
+}
+
+func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string) ([]models.ElementShareSummary, error) {
+	if companyIds == nil {
+		companyIds = []string{}
+	}
+	if groupIds == nil {
+		groupIds = []string{}
+	}
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT id, type, root_ids, audience_kind, role, created_by,
+		       source_dag_id, expires_at, catalog, tags, created_at
+		FROM element_shares
+		WHERE revoked = FALSE
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		  AND created_by != $1
+		  AND (
+		    audience_kind = 'public'
+		    OR (audience_kind = 'user'    AND $1 = ANY(audience_ids))
+		    OR (audience_kind = 'company' AND audience_ids && $2::text[])
+		    OR (audience_kind = 'group'   AND audience_ids && $3::text[])
+		  )
+		ORDER BY created_at DESC`, caller, companyIds, groupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.ElementShareSummary
+	for rows.Next() {
+		var s models.ElementShareSummary
+		var sourceDagId *string
+		var expiresAt *time.Time
+		if err := rows.Scan(
+			&s.Id, &s.Type, &s.RootIds, &s.AudienceKind, &s.Role, &s.CreatedBy,
+			&sourceDagId, &expiresAt, &s.Catalog, &s.Tags, &s.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if sourceDagId != nil {
+			s.SourceDagId = *sourceDagId
+		}
+		if expiresAt != nil {
+			s.ExpiresAt = *expiresAt
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}

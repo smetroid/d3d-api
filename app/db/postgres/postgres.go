@@ -1162,3 +1162,93 @@ func (p *Postgres) UpsertGroupByExternalRef(g models.Group) (string, error) {
 		g.Id, g.Name, g.CompanyId, g.ExternalRef, g.CreatedAt).Scan(&id)
 	return id, err
 }
+
+// ─── Element Shares ───────────────────────────────────────────────────────────
+
+func (p *Postgres) CreateElementShare(s models.ElementShare) (string, error) {
+	if s.Id == "" {
+		s.Id = uuid.New().String()
+	}
+	var jti *string
+	if s.Jti != "" {
+		jti = &s.Jti
+	}
+	var sourceDagId *string
+	if s.SourceDagId != "" {
+		sourceDagId = &s.SourceDagId
+	}
+	_, err := p.pool.Exec(context.Background(), `
+		INSERT INTO element_shares (
+			id, type, root_ids, cluster, audience_kind, audience_ids,
+			role, created_by, source_dag_id, expires_at, revoked,
+			catalog, tags, imported_by, jti, anon_name, created_at
+		) VALUES (
+			$1, $2, $3, $4::jsonb, $5, $6,
+			$7, $8, $9, $10, $11,
+			$12, $13, $14, $15, $16, $17
+		)`,
+		s.Id, s.Type, s.RootIds, jsonbValue(s.Cluster), s.AudienceKind, s.AudienceIds,
+		s.Role, s.CreatedBy, sourceDagId, timeOrNil(s.ExpiresAt), s.Revoked,
+		s.Catalog, s.Tags, s.ImportedBy, jti, s.AnonName, s.CreatedAt)
+	if err != nil {
+		return "", err
+	}
+	return s.Id, nil
+}
+
+func (p *Postgres) GetElementShare(id string) (models.ElementShare, error) {
+	var s models.ElementShare
+	var jti, sourceDagId *string
+	var expiresAt *time.Time
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id, type, root_ids, cluster::text, audience_kind, audience_ids,
+		       role, created_by, source_dag_id, expires_at, revoked,
+		       catalog, tags, imported_by, jti, anon_name, created_at
+		FROM element_shares WHERE id = $1`, id).Scan(
+		&s.Id, &s.Type, &s.RootIds, &s.Cluster, &s.AudienceKind, &s.AudienceIds,
+		&s.Role, &s.CreatedBy, &sourceDagId, &expiresAt, &s.Revoked,
+		&s.Catalog, &s.Tags, &s.ImportedBy, &jti, &s.AnonName, &s.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.ElementShare{}, ErrNotFound
+	}
+	if err != nil {
+		return models.ElementShare{}, err
+	}
+	if jti != nil {
+		s.Jti = *jti
+	}
+	if sourceDagId != nil {
+		s.SourceDagId = *sourceDagId
+	}
+	if expiresAt != nil {
+		s.ExpiresAt = *expiresAt
+	}
+	return s, nil
+}
+
+func (p *Postgres) GetElementShareByJti(jti string) (models.ElementShare, error) {
+	var id string
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT id FROM element_shares WHERE jti = $1`, jti).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.ElementShare{}, ErrNotFound
+	}
+	if err != nil {
+		return models.ElementShare{}, err
+	}
+	return p.GetElementShare(id)
+}
+
+func (p *Postgres) RevokeElementShare(id string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		UPDATE element_shares SET revoked = TRUE WHERE id = $1`, id)
+	return err
+}
+
+func (p *Postgres) AppendImportedBy(id, username string) error {
+	_, err := p.pool.Exec(context.Background(), `
+		UPDATE element_shares
+		SET imported_by = array_append(imported_by, $2)
+		WHERE id = $1 AND NOT ($2 = ANY(imported_by))`, id, username)
+	return err
+}

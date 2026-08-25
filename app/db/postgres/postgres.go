@@ -1193,15 +1193,15 @@ func (p *Postgres) CreateElementShare(s models.ElementShare) (string, error) {
 		INSERT INTO element_shares (
 			id, type, root_ids, cluster, audience_kind, audience_ids,
 			role, created_by, source_dag_id, expires_at, revoked,
-			catalog, tags, imported_by, jti, anon_name, created_at
+			catalog, tags, imported_by, jti, anon_name, title, created_at
 		) VALUES (
 			$1, $2, $3, $4::jsonb, $5, $6,
 			$7, $8, $9, $10, $11,
-			$12, $13, $14, $15, $16, $17
+			$12, $13, $14, $15, $16, $17, $18
 		)`,
 		s.Id, s.Type, s.RootIds, jsonbValue(s.Cluster), s.AudienceKind, s.AudienceIds,
 		s.Role, s.CreatedBy, sourceDagId, timeOrNil(s.ExpiresAt), s.Revoked,
-		s.Catalog, s.Tags, s.ImportedBy, jti, s.AnonName, s.CreatedAt)
+		s.Catalog, s.Tags, s.ImportedBy, jti, s.AnonName, s.Title, s.CreatedAt)
 	if err != nil {
 		return "", err
 	}
@@ -1215,11 +1215,11 @@ func (p *Postgres) GetElementShare(id string) (models.ElementShare, error) {
 	err := p.pool.QueryRow(context.Background(), `
 		SELECT id, type, root_ids, cluster::text, audience_kind, audience_ids,
 		       role, created_by, source_dag_id, expires_at, revoked,
-		       catalog, tags, imported_by, jti, anon_name, created_at
+		       catalog, tags, imported_by, jti, anon_name, title, created_at
 		FROM element_shares WHERE id = $1`, id).Scan(
 		&s.Id, &s.Type, &s.RootIds, &s.Cluster, &s.AudienceKind, &s.AudienceIds,
 		&s.Role, &s.CreatedBy, &sourceDagId, &expiresAt, &s.Revoked,
-		&s.Catalog, &s.Tags, &s.ImportedBy, &jti, &s.AnonName, &s.CreatedAt)
+		&s.Catalog, &s.Tags, &s.ImportedBy, &jti, &s.AnonName, &s.Title, &s.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.ElementShare{}, ErrNotFound
 	}
@@ -1273,15 +1273,14 @@ func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string)
 		groupIds = []string{}
 	}
 	rows, err := p.pool.Query(context.Background(), `
-		SELECT id, type, root_ids, audience_kind, role, created_by,
+		SELECT id, title, type, root_ids, audience_kind, role, created_by,
 		       source_dag_id, expires_at, catalog, tags, created_at
 		FROM element_shares
 		WHERE revoked = FALSE
 		  AND (expires_at IS NULL OR expires_at > NOW())
 		  AND created_by != $1
 		  AND (
-		    audience_kind = 'public'
-		    OR (audience_kind = 'user'    AND $1 = ANY(audience_ids))
+		    (audience_kind = 'user'    AND $1 = ANY(audience_ids))
 		    OR (audience_kind = 'company' AND audience_ids && $2::text[])
 		    OR (audience_kind = 'group'   AND audience_ids && $3::text[])
 		  )
@@ -1297,7 +1296,7 @@ func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string)
 		var sourceDagId *string
 		var expiresAt *time.Time
 		if err := rows.Scan(
-			&s.Id, &s.Type, &s.RootIds, &s.AudienceKind, &s.Role, &s.CreatedBy,
+			&s.Id, &s.Title, &s.Type, &s.RootIds, &s.AudienceKind, &s.Role, &s.CreatedBy,
 			&sourceDagId, &expiresAt, &s.Catalog, &s.Tags, &s.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1309,6 +1308,49 @@ func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string)
 			s.ExpiresAt = *expiresAt
 		}
 		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ListCatalogShares(limit int) ([]models.CatalogRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(context.Background(), `
+		SELECT id, title, root_ids, tags, created_by, cluster::text, jti, expires_at, created_at
+		FROM element_shares
+		WHERE catalog = TRUE AND revoked = FALSE AND audience_kind = 'public'
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		ORDER BY created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.CatalogRow
+	for rows.Next() {
+		var r models.CatalogRow
+		var jti *string
+		var expiresAt *time.Time
+		if err := rows.Scan(
+			&r.Id, &r.Title, &r.RootIds, &r.Tags, &r.CreatedBy, &r.Cluster, &jti, &expiresAt, &r.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if jti != nil {
+			r.Jti = *jti
+		}
+		if expiresAt != nil {
+			r.ExpiresAt = *expiresAt
+		}
+		if r.Tags == nil {
+			r.Tags = []string{}
+		}
+		if r.RootIds == nil {
+			r.RootIds = []string{}
+		}
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }

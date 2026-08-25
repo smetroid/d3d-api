@@ -39,12 +39,13 @@ type GroupMember struct {
 // is used for the same denylist revocation flow as diagram share links.
 type ElementShare struct {
 	Id           string    `db:"id" json:"id"`
-	Type         string    `db:"type" json:"type"`                 // "node" | "edge" | "cluster"
+	Title        string    `db:"title" json:"title"`
+	Type         string    `db:"type" json:"type"`                  // "node" | "edge" | "cluster"
 	RootIds      []string  `db:"root_ids" json:"rootIds"`
-	Cluster      string    `db:"cluster" json:"cluster"`           // graphlib subgraph JSON
+	Cluster      string    `db:"cluster" json:"cluster"`            // graphlib subgraph JSON
 	AudienceKind string    `db:"audience_kind" json:"audienceKind"` // "public" | "user" | "company" | "group"
 	AudienceIds  []string  `db:"audience_ids" json:"audienceIds"`
-	Role         string    `db:"role" json:"role"`                 // "view" | "edit"
+	Role         string    `db:"role" json:"role"`                  // "view" | "edit"
 	CreatedBy    string    `db:"created_by" json:"createdBy"`
 	SourceDagId  string    `db:"source_dag_id" json:"sourceDagId,omitempty"`
 	ExpiresAt    time.Time `db:"expires_at" json:"expiresAt,omitempty"`
@@ -74,10 +75,12 @@ type CreateElementShareRequest struct {
 	ExpDays  int          `json:"expDays"`
 	Catalog  bool         `json:"catalog"`
 	Tags     []string     `json:"tags"`
+	Title    string       `json:"title"`
 }
 
 type ElementShareSummary struct {
 	Id           string    `json:"id"`
+	Title        string    `json:"title"`
 	Type         string    `json:"type"`
 	RootIds      []string  `json:"rootIds"`
 	AudienceKind string    `json:"audienceKind"`
@@ -88,6 +91,34 @@ type ElementShareSummary struct {
 	Catalog      bool      `json:"catalog"`
 	Tags         []string  `json:"tags"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+// CatalogRow is the raw DB record from ListCatalogShares. The controller
+// derives NodeCount, EdgeCount, and Token before serving the CatalogEntry.
+type CatalogRow struct {
+	Id        string
+	Title     string
+	CreatedBy string
+	RootIds   []string
+	Tags      []string
+	Cluster   string
+	Jti       string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
+
+// CatalogEntry is the public-facing catalog item returned by GET /catalog.
+type CatalogEntry struct {
+	Id        string    `json:"id"`
+	Title     string    `json:"title"`
+	CreatedBy string    `json:"createdBy"`
+	RootIds   []string  `json:"rootIds"`
+	NodeCount int       `json:"nodeCount"`
+	EdgeCount int       `json:"edgeCount"`
+	Token     string    `json:"token"`
+	Tags      []string  `json:"tags"`
+	ExpiresAt time.Time `json:"expiresAt,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type ElementShareResponse struct {

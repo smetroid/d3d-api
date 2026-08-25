@@ -684,13 +684,13 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 	aliceCompanyIds := []string{coID}
 	aliceGroupIds := []string{grpID}
 
-	// Shares that MUST appear in alice's inbox.
-	wantPublic  := makeShare("public",  nil,              "bob", false, time.Time{})
+	// Shares that MUST appear in alice's inbox (user/company/group only — not public).
 	wantUser    := makeShare("user",    []string{"alice"}, "bob", false, time.Time{})
 	wantCompany := makeShare("company", []string{coID},   "bob", false, time.Time{})
 	wantGroup   := makeShare("group",   []string{grpID},  "bob", false, time.Time{})
 
 	// Shares that must NOT appear.
+	makeShare("public",  nil,               "bob",  false, time.Time{})            // public → catalog only
 	makeShare("public",  nil,               "alice", false, time.Time{})           // own share
 	makeShare("user",    []string{"carol"},  "bob",  false, time.Time{})           // different user
 	makeShare("company", []string{"other"},  "bob",  false, time.Time{})           // different company
@@ -708,13 +708,13 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 		got[s.Id] = true
 	}
 
-	for _, wantID := range []string{wantPublic, wantUser, wantCompany, wantGroup} {
+	for _, wantID := range []string{wantUser, wantCompany, wantGroup} {
 		if !got[wantID] {
 			t.Errorf("share %s missing from inbox", wantID)
 		}
 	}
-	if len(shares) != 4 {
-		t.Errorf("expected 4 inbox shares, got %d", len(shares))
+	if len(shares) != 3 {
+		t.Errorf("expected 3 inbox shares, got %d", len(shares))
 	}
 }
 
@@ -738,15 +738,67 @@ func TestPostgres_ListInboxShares_NoMemberships(t *testing.T) {
 		return id
 	}
 
-	publicID := makeShare("public", nil)
+	makeShare("public", nil)
 	makeShare("company", []string{"some-co"})
 	makeShare("group", []string{"some-grp"})
+	userID := makeShare("user", []string{"alice"})
 
 	shares, err := p.ListInboxShares("alice", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(shares) != 1 || shares[0].Id != publicID {
-		t.Errorf("expected only the public share, got %d shares", len(shares))
+	if len(shares) != 1 || shares[0].Id != userID {
+		t.Errorf("expected only the user-targeted share, got %d shares", len(shares))
+	}
+}
+
+func TestPostgres_ListCatalogShares(t *testing.T) {
+	p := newTestPostgres(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	future := now.Add(24 * time.Hour)
+
+	makeShare := func(catalog bool, audienceKind string, revoked bool, expiresAt time.Time, title string) string {
+		t.Helper()
+		id, err := p.CreateElementShare(models.ElementShare{
+			Type:         "node",
+			Title:        title,
+			RootIds:      []string{"n1"},
+			Cluster:      `{"nodes":[{"v":"n1","value":{}}],"edges":[]}`,
+			AudienceKind: audienceKind,
+			AudienceIds:  []string{},
+			Role:         "view",
+			CreatedBy:    "alice",
+			Catalog:      catalog,
+			Revoked:      revoked,
+			Tags:         []string{},
+			ImportedBy:   []string{},
+			CreatedAt:    now,
+			ExpiresAt:    expiresAt,
+		})
+		if err != nil {
+			t.Fatalf("CreateElementShare: %v", err)
+		}
+		return id
+	}
+
+	wantID := makeShare(true, "public", false, future, "Auth cluster")
+	makeShare(false, "public", false, future, "")       // catalog=false → excluded
+	makeShare(true, "public", true,  future, "")        // revoked → excluded
+	makeShare(true, "public", false, now.Add(-time.Hour), "") // expired → excluded
+	makeShare(true, "user",   false, future, "")        // non-public → excluded
+
+	rows, err := p.ListCatalogShares(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 catalog row, got %d", len(rows))
+	}
+	if rows[0].Id != wantID {
+		t.Errorf("expected catalog row %s, got %s", wantID, rows[0].Id)
+	}
+	if rows[0].Title != "Auth cluster" {
+		t.Errorf("expected title 'Auth cluster', got %q", rows[0].Title)
 	}
 }

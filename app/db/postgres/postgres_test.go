@@ -802,3 +802,32 @@ func TestPostgres_ListCatalogShares(t *testing.T) {
 		t.Errorf("expected title 'Auth cluster', got %q", rows[0].Title)
 	}
 }
+
+func TestPostgres_GetElementShare_Title(t *testing.T) {
+	p := newTestPostgres(t)
+
+	id, err := p.CreateElementShare(models.ElementShare{
+		Type:         "node",
+		Title:        "My titled share",
+		RootIds:      []string{"n1"},
+		Cluster:      `{"nodes":[],"edges":[]}`,
+		AudienceKind: "public",
+		AudienceIds:  []string{},
+		Role:         "view",
+		CreatedBy:    "alice",
+		Tags:         []string{},
+		ImportedBy:   []string{},
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("CreateElementShare: %v", err)
+	}
+
+	got, err := p.GetElementShare(id)
+	if err != nil {
+		t.Fatalf("GetElementShare: %v", err)
+	}
+	if got.Title != "My titled share" {
+		t.Errorf("expected title %q, got %q", "My titled share", got.Title)
+	}
+}

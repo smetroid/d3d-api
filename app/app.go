@@ -130,6 +130,13 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		AuthMiddleware: authMiddleware,
 	}
 
+	elementSharesController := controllers.ElementSharesController{
+		Echo:           e,
+		DB:             db,
+		SigningKey:     config.Samus.SigningKey,
+		AuthMiddleware: authMiddleware,
+	}
+
 	dagController.Init()
 	edgeController.Init()
 	nodeController.Init()
@@ -137,6 +144,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 	sharesController.Init()
 	companiesController.Init()
 	groupsController.Init()
+	elementSharesController.Init()
 
 	// Route => handler
 	/*

@@ -27,6 +27,7 @@ type ElementSharesController struct {
 func (ec *ElementSharesController) Init() {
 	// Public — no auth required
 	ec.Echo.GET("/element-shares/exchange", ec.exchangeElementShare)
+	ec.Echo.GET("/catalog", ec.listCatalog)
 	// Auth required
 	ec.Echo.POST("/dag/:dag/elements/shares", ec.createElementShare, ec.AuthMiddleware)
 	ec.Echo.GET("/element-shares/:id", ec.getElementShare, ec.AuthMiddleware)
@@ -101,6 +102,7 @@ func (ec *ElementSharesController) createElementShare(ctx echo.Context) error {
 	exp := time.Now().Add(time.Duration(req.ExpDays) * 24 * time.Hour)
 	share := models.ElementShare{
 		Id:           uuid.New().String(),
+		Title:        req.Title,
 		Type:         elemType,
 		RootIds:      req.RootIds,
 		Cluster:      string(clusterJSON),
@@ -336,6 +338,74 @@ func (ec *ElementSharesController) listInbox(ctx echo.Context) error {
 		"status": "ok",
 		"shares": shares,
 	})
+}
+
+// GET /catalog  (public, no auth)
+func (ec *ElementSharesController) listCatalog(ctx echo.Context) error {
+	limit := 50
+	if l := ctx.QueryParam("limit"); l != "" {
+		if n, err := fmt.Sscanf(l, "%d", &limit); n != 1 || err != nil || limit <= 0 {
+			limit = 50
+		}
+		if limit > 200 {
+			limit = 200
+		}
+	}
+
+	rows, err := ec.DB.ListCatalogShares(limit)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+	}
+
+	items := make([]models.CatalogEntry, 0, len(rows))
+	for _, r := range rows {
+		nodeCount, edgeCount := countClusterElements(r.Cluster)
+
+		var tok string
+		if r.Jti != "" {
+			exp := r.ExpiresAt.Unix()
+			if r.ExpiresAt.IsZero() {
+				exp = 0
+			}
+			claims := jwt.MapClaims{
+				"jti":      r.Jti,
+				"iss":      "d3d-element-share",
+				"share_id": r.Id,
+				"role":     "view",
+			}
+			if exp > 0 {
+				claims["exp"] = exp
+			}
+			tok, _ = token.CreateToken(ec.SigningKey, claims)
+		}
+
+		items = append(items, models.CatalogEntry{
+			Id:        r.Id,
+			Title:     r.Title,
+			CreatedBy: r.CreatedBy,
+			RootIds:   r.RootIds,
+			NodeCount: nodeCount,
+			EdgeCount: edgeCount,
+			Token:     tok,
+			Tags:      r.Tags,
+			ExpiresAt: r.ExpiresAt,
+			CreatedAt: r.CreatedAt,
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"items":  items,
+	})
+}
+
+func countClusterElements(clusterJSON string) (nodeCount, edgeCount int) {
+	var g struct {
+		Nodes []json.RawMessage `json:"nodes"`
+		Edges []json.RawMessage `json:"edges"`
+	}
+	_ = json.Unmarshal([]byte(clusterJSON), &g)
+	return len(g.Nodes), len(g.Edges)
 }
 
 // detectType returns "node", "edge", or "cluster" based on whether rootIds

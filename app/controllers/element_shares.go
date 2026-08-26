@@ -246,11 +246,7 @@ func (ec *ElementSharesController) getElementShare(ctx echo.Context) error {
 		}
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
-		"status":  "ok",
-		"share":   share,
-		"cluster": json.RawMessage(share.Cluster),
-	})
+	return ctx.JSON(http.StatusOK, share)
 }
 
 // POST /element-shares/:id/revoke
@@ -295,15 +291,17 @@ func (ec *ElementSharesController) importElementShare(ctx echo.Context) error {
 		return ctx.JSON(http.StatusGone, models.ErrorResponse("share revoked"))
 	}
 
-	allowed, err := membership.UserInAudience(ec.DB, caller, models.AudienceSpec{
-		Kind: share.AudienceKind,
-		Ids:  share.AudienceIds,
-	})
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
-	}
-	if !allowed {
-		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("access denied"))
+	if share.CreatedBy != caller {
+		allowed, err := membership.UserInAudience(ec.DB, caller, models.AudienceSpec{
+			Kind: share.AudienceKind,
+			Ids:  share.AudienceIds,
+		})
+		if err != nil {
+			return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))
+		}
+		if !allowed {
+			return ctx.JSON(http.StatusForbidden, models.ErrorResponse("access denied"))
+		}
 	}
 
 	if err := ec.DB.AppendImportedBy(id, caller); err != nil {

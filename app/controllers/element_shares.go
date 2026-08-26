@@ -246,7 +246,26 @@ func (ec *ElementSharesController) getElementShare(ctx echo.Context) error {
 		}
 	}
 
-	return ctx.JSON(http.StatusOK, share)
+	return ctx.JSON(http.StatusOK, map[string]interface{}{
+		"id":          share.Id,
+		"title":       share.Title,
+		"type":        share.Type,
+		"rootIds":     share.RootIds,
+		"cluster":     json.RawMessage(share.Cluster),
+		"audienceKind": share.AudienceKind,
+		"audienceIds": share.AudienceIds,
+		"role":        share.Role,
+		"createdBy":   share.CreatedBy,
+		"sourceDagId": share.SourceDagId,
+		"expiresAt":   share.ExpiresAt,
+		"revoked":     share.Revoked,
+		"catalog":     share.Catalog,
+		"tags":        share.Tags,
+		"importedBy":  share.ImportedBy,
+		"jti":         share.Jti,
+		"anonName":    share.AnonName,
+		"createdAt":   share.CreatedAt,
+	})
 }
 
 // POST /element-shares/:id/revoke

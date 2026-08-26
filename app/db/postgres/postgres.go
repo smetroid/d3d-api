@@ -1289,7 +1289,7 @@ func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string)
 	}
 	defer rows.Close()
 
-	var out []models.ElementShareSummary
+	out := make([]models.ElementShareSummary, 0)
 	for rows.Next() {
 		var s models.ElementShareSummary
 		var sourceDagId *string

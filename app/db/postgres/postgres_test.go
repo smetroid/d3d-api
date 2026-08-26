@@ -684,19 +684,21 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 	aliceCompanyIds := []string{coID}
 	aliceGroupIds := []string{grpID}
 
-	// Shares that MUST appear in alice's inbox (user/company/group only — not public).
-	wantUser    := makeShare("user",    []string{"alice"}, "bob", false, time.Time{})
-	wantCompany := makeShare("company", []string{coID},   "bob", false, time.Time{})
-	wantGroup   := makeShare("group",   []string{grpID},  "bob", false, time.Time{})
+	// Shares that MUST appear in alice's inbox.
+	wantUserFromBob  := makeShare("user",    []string{"alice"}, "bob",   false, time.Time{})
+	wantUserSelf     := makeShare("user",    []string{"alice"}, "alice", false, time.Time{}) // "Me" self-share
+	wantCompany      := makeShare("company", []string{coID},    "bob",   false, time.Time{})
+	wantGroup        := makeShare("group",   []string{grpID},   "bob",   false, time.Time{})
 
 	// Shares that must NOT appear.
-	makeShare("public",  nil,               "bob",  false, time.Time{})            // public → catalog only
-	makeShare("public",  nil,               "alice", false, time.Time{})           // own share
-	makeShare("user",    []string{"carol"},  "bob",  false, time.Time{})           // different user
-	makeShare("company", []string{"other"},  "bob",  false, time.Time{})           // different company
-	makeShare("group",   []string{"other"},  "bob",  false, time.Time{})           // different group
-	makeShare("public",  nil,               "bob",  true,  time.Time{})            // revoked
-	makeShare("public",  nil,               "bob",  false, now.Add(-time.Hour))    // expired
+	makeShare("public",  nil,               "bob",   false, time.Time{})           // public → catalog only
+	makeShare("user",    []string{"carol"},  "bob",   false, time.Time{})           // different user
+	makeShare("company", []string{"other"},  "bob",   false, time.Time{})           // different company
+	makeShare("group",   []string{"other"},  "bob",   false, time.Time{})           // different group
+	makeShare("company", []string{coID},    "alice", false, time.Time{})           // own company broadcast
+	makeShare("group",   []string{grpID},   "alice", false, time.Time{})           // own group broadcast
+	makeShare("public",  nil,               "bob",   true,  time.Time{})           // revoked
+	makeShare("public",  nil,               "bob",   false, now.Add(-time.Hour))   // expired
 
 	shares, err := p.ListInboxShares("alice", aliceCompanyIds, aliceGroupIds)
 	if err != nil {
@@ -708,13 +710,13 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 		got[s.Id] = true
 	}
 
-	for _, wantID := range []string{wantUser, wantCompany, wantGroup} {
+	for _, wantID := range []string{wantUserFromBob, wantUserSelf, wantCompany, wantGroup} {
 		if !got[wantID] {
 			t.Errorf("share %s missing from inbox", wantID)
 		}
 	}
-	if len(shares) != 3 {
-		t.Errorf("expected 3 inbox shares, got %d", len(shares))
+	if len(shares) != 4 {
+		t.Errorf("expected 4 inbox shares, got %d", len(shares))
 	}
 }
 

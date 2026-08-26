@@ -1278,11 +1278,10 @@ func (p *Postgres) ListInboxShares(caller string, companyIds, groupIds []string)
 		FROM element_shares
 		WHERE revoked = FALSE
 		  AND (expires_at IS NULL OR expires_at > NOW())
-		  AND created_by != $1
 		  AND (
 		    (audience_kind = 'user'    AND $1 = ANY(audience_ids))
-		    OR (audience_kind = 'company' AND audience_ids && $2::text[])
-		    OR (audience_kind = 'group'   AND audience_ids && $3::text[])
+		    OR (audience_kind = 'company' AND created_by != $1 AND audience_ids && $2::text[])
+		    OR (audience_kind = 'group'   AND created_by != $1 AND audience_ids && $3::text[])
 		  )
 		ORDER BY created_at DESC`, caller, companyIds, groupIds)
 	if err != nil {

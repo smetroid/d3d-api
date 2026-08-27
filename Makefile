@@ -8,14 +8,14 @@ RETHINKDB_CONTAINER=rethinkdb
 	precommit-install precommit-run
 
 postgres-start:
-	docker start $(POSTGRES_CONTAINER) 2>/dev/null || docker run -d --name $(POSTGRES_CONTAINER) -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
+	docker start $(POSTGRES_CONTAINER) 2>/dev/null || docker run -d --name $(POSTGRES_CONTAINER) -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=samus postgres:16-alpine
 
 postgres-stop:
 	docker stop $(POSTGRES_CONTAINER)
 
 start-api-service:
 	$(MAKE) postgres-start
-	gin --all run samus.go
+	gin -i --all --bin .gin-bin run --config samus_dev.toml
 
 install-gin-autoreload:
 	go install github.com/codegangsta/gin@latest

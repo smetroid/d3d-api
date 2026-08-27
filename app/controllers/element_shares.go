@@ -208,6 +208,7 @@ func (ec *ElementSharesController) exchangeElementShare(ctx echo.Context) error 
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"status":   "ok",
 		"shareId":  share.Id,
+		"title":    share.Title,
 		"role":     role,
 		"anonName": share.AnonName,
 		"cluster":  json.RawMessage(share.Cluster),

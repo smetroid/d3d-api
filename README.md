@@ -219,19 +219,40 @@ For the full step-by-step production cutover (freeze, preflight, migrate, verify
 
 ## Deployment
 
-The image runs the API binary, which reads its config from `./samus.toml` (or the path given by `--config`). Provide a `samus.toml` with a `[postgres] dsn` (or a discrete `[postgresql]` block) pointing at your Postgres instance; `samus.tmpl` is an env-substitution template for rendering that config from environment variables (e.g. `POSTGRES_DSN`). CI is required to pass before deploy.
+Deploys run through Vercel's Git integration, not GitHub Actions: pushing to `main` produces a production deployment and opening a pull request produces a preview deployment. There is no deploy workflow in this repository to trigger by hand.
+
+`vercel.json` builds `Dockerfile.vercel` with `@vercel/container` and supplies the non-secret settings (`AUTH_PROVIDER=localauth`, the `LOG_*` flags, TLS disabled, empty LDAP/OAuth blocks). The image is a two-stage build: `golang:1.23` compiles the binary, and an Alpine runtime layer adds `gomplate`.
+
+The container does not ship a config file. `entrypoint.sh` builds one at startup:
+
+```sh
+export BIND_ADDR="0.0.0.0:${PORT:-8081}"
+export POSTGRES_DSN="${DATABASE_URL}"
+gomplate --file samus.tmpl --out samus.toml
+exec ./main --config ./samus.toml
+```
+
+So the database connection comes from **`DATABASE_URL`** — not `POSTGRES_DSN`, `POSTGRES_URL`, or any of the other names the Neon integration provides. Renaming or unsetting `DATABASE_URL` makes the app fall back to a passwordless `postgres://localhost:5432/samus`, which fails to connect.
+
+Postgres is Neon, attached through the Vercel integration, which injects `DATABASE_URL`, `POSTGRES_URL`, `PG*`, and friends. `SIGNING_KEY` is set as a project environment variable.
+
+Migrations need no deploy step. `Postgres.Init` runs the embedded goose migrations before the app serves anything, and `BuildApp` calls `log.Fatal` if they fail — a deployment that is serving traffic has necessarily applied every migration in `app/db/postgres/migrations/`.
+
+> **Preview deployments share the production database.** Every Postgres variable is scoped to both Production and Preview with the same value, so a preview deployment runs migrations against, and writes to, production data. A migration on an unmerged branch reaches production as soon as the preview boots. Giving preview its own Neon branch would remove this.
+
+To deploy a build of arbitrary code outside Git (a rollback rehearsal, a debug build), the image runs anywhere: supply a `samus.toml` with a `[postgres] dsn` (or a discrete `[postgresql]` block), or set `DATABASE_URL` and let `entrypoint.sh` render one from `samus.tmpl`.
 
 ## CI/CD
 
-GitHub Actions drives quality gates and deploys:
+GitHub Actions drives the quality gates. Deploys are handled by Vercel (see [Deployment](#deployment)), so no workflow here builds or ships the app:
 
 | Workflow | Triggers | Checks / actions |
 |---|---|---|
 | `.github/workflows/ci.yml` | every PR + push to `main` | gitleaks secret scan, golangci-lint, `go test -race` against a Postgres 16 service container (`TEST_DATABASE_URL`), `CGO_ENABLED=0 go build`, `go vet`, `go mod tidy` drift check |
-| `.github/workflows/deploy.yml` | push to `main` | build image → push to GHCR (`ghcr.io/smetroid/d3d-api`) → `flyctl deploy` |
+| `.github/workflows/secrets-scan.yml` | PRs + pushes to `main` | standalone gitleaks scan |
 | `.github/workflows/vercel-registry-prune.yml` | daily at 06:00 UTC + manual dispatch | delete all but the 25 newest images in the Vercel container registry |
 
-Repository secrets required for deploy: `FLY_API_TOKEN` (from `flyctl auth token` or the Fly dashboard). GHCR auth uses the automatic `GITHUB_TOKEN`; no extra secret needed.
+Repository secrets: `VERCEL_TOKEN` for the registry prune job (see below). The secret scan uses the automatic `GITHUB_TOKEN`; no extra secret needed. Deploy credentials live in Vercel, not here.
 
 ### Vercel container registry pruning
 

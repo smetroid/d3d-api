@@ -1,0 +1,41 @@
+# Local development config.
+#
+#   cp samus_dev.toml.example samus_dev.toml
+#   make start-api-service
+#
+# samus_dev.toml is gitignored, so edit your copy freely. Only the keys
+# below are read by app/config.Config -- other sections that appear in
+# older configs ([rethinkdb], [notifiers], continuous_query_interval)
+# are ignored by the TOML decoder and have no effect.
+
+[samus]
+    # The app always binds this port. gin proxies to it from :3000, so in
+    # development you make requests against http://localhost:3000.
+    bind_addr = ":3001"
+
+    # Signs the JWTs handed out by /auth/login. Any non-empty value works
+    # locally; use a real secret in production.
+    signing_key = "dev-signing-key-change-in-prod"
+
+    # "localauth" authenticates against the users table, so development
+    # needs no LDAP server. Create a user before logging in:
+    #
+    #   go run samus.go createUser dev devpass --config samus_dev.toml
+    #
+    # Defaults to "ldap" when unset -- see setDefaultConfigs.
+    auth_provider = "localauth"
+
+    log_dag_requests = true
+    log_edge_requests = false
+    log_node_requests = false
+    log_menu_requests = false
+
+[postgres]
+    # Matches the container started by `make postgres-start`, which creates
+    # this database via POSTGRES_DB. Schema is applied automatically: Init
+    # runs the embedded goose migrations on startup, so an empty database
+    # is all that is required.
+    #
+    # When unset, the DSN falls back to a passwordless postgres://localhost
+    # connection that will not authenticate against that container.
+    dsn = "postgres://postgres:postgres@localhost:5432/samus?sslmode=disable"

@@ -40,12 +40,12 @@ type GroupMember struct {
 type ElementShare struct {
 	Id           string    `db:"id" json:"id"`
 	Title        string    `db:"title" json:"title"`
-	Type         string    `db:"type" json:"type"`                  // "node" | "edge" | "cluster"
+	Type         string    `db:"type" json:"type"` // "node" | "edge" | "cluster"
 	RootIds      []string  `db:"root_ids" json:"rootIds"`
 	Cluster      string    `db:"cluster" json:"cluster"`            // graphlib subgraph JSON
 	AudienceKind string    `db:"audience_kind" json:"audienceKind"` // "public" | "user" | "company" | "group"
 	AudienceIds  []string  `db:"audience_ids" json:"audienceIds"`
-	Role         string    `db:"role" json:"role"`                  // "view" | "edit"
+	Role         string    `db:"role" json:"role"` // "view" | "edit"
 	CreatedBy    string    `db:"created_by" json:"createdBy"`
 	SourceDagId  string    `db:"source_dag_id" json:"sourceDagId,omitempty"`
 	ExpiresAt    time.Time `db:"expires_at" json:"expiresAt,omitempty"`

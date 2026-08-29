@@ -23,23 +23,34 @@ Go REST + WebSocket backend for [d3dweb](https://github.com/smetroid/d3dweb). St
 ### 1. Start PostgreSQL
 
 ```bash
-docker run -d --name pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
-# or if the container already exists:
-docker start pg
+make postgres-start
 ```
 
-The schema is managed by embedded goose migrations and is applied automatically on startup (`app/db/postgres/migrations/`). No manual setup is required.
+That starts the existing `pg` container, or creates one if it is missing:
+
+```bash
+docker run -d --name pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=samus postgres:16-alpine
+```
+
+`POSTGRES_DB=samus` matters because the DSN below names that database. It only takes effect when the data directory is initialized, so a container created **without** it keeps failing with `database "samus" does not exist`. Create the database once by hand rather than recreating the container:
+
+```bash
+docker exec pg psql -U postgres -c 'CREATE DATABASE samus;'
+```
+
+The schema itself needs no setup. `Init` applies the embedded goose migrations on startup (`app/db/postgres/migrations/`), so an empty database is enough.
 
 ### 2. Configure the API
 
-Copy `samus_dev.toml` as your local config (it is gitignored):
+Copy the template; your copy is gitignored, so edit it freely:
+
+```bash
+cp samus_dev.toml.example samus_dev.toml
+```
+
+It defaults to `auth_provider = "localauth"` (no LDAP server needed) and points at the container from step 1:
 
 ```toml
-[samus]
-    bind_addr     = ":3001"
-    signing_key   = "dev-signing-key-change-in-prod"
-    auth_provider = "localauth"
-
 [postgres]
     dsn = "postgres://postgres:postgres@localhost:5432/samus?sslmode=disable"
 ```
@@ -57,6 +68,8 @@ Alternatively, spell out the connection as discrete fields under `[postgresql]`
 
 A non-empty `dsn` always wins when both forms are present.
 
+Configuring neither is not the same as omitting the section: the DSN then falls back to a passwordless `postgres://localhost:5432/samus`, which will not authenticate against the container from step 1.
+
 ### 3. Create the first user
 
 `localauth` stores bcrypt hashed users in the `users` table:
@@ -69,12 +82,17 @@ go run . createUser admin changeme --config samus_dev.toml
 
 ```bash
 go run . --config samus_dev.toml
-
-# with live-reload
-gin --all run samus.go -- --config samus_dev.toml
 ```
 
-Without `--config`, the app reads `./samus.toml`. The API listens on the `bind_addr` from your config (e.g. `http://localhost:3001`).
+Or with live-reload, which also starts PostgreSQL for you:
+
+```bash
+make start-api-service
+```
+
+That runs `gin` as a reverse proxy: `gin` listens on **:3000** and rebuilds on change, while the app itself binds `bind_addr` (`:3001`). Make your requests against `http://localhost:3000` so you get the reloading proxy. Running `go run .` directly means no proxy, so use `:3001` instead.
+
+Without `--config`, the app reads `./samus.toml` — the LDAP config, which has no `[postgres]` section. Note that `gin` forwards everything after `run` to the built binary as arguments, so the flag belongs there directly (`gin run --config samus_dev.toml`); passing a filename such as `samus.go` silently consumes the first argument slot and the app falls back to `./samus.toml`.
 
 ## API reference
 

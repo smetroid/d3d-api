@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
@@ -14,14 +15,13 @@ import (
 	"github.com/smetroid/d3d-api/app/cluster"
 	"github.com/smetroid/d3d-api/app/db/postgres"
 	"github.com/smetroid/d3d-api/app/models"
-	"encoding/json"
 )
 
 type ElementSharesController struct {
 	Echo           *echo.Echo
 	DB             *postgres.Postgres
-	SigningKey      string
-	AuthMiddleware  echo.MiddlewareFunc
+	SigningKey     string
+	AuthMiddleware echo.MiddlewareFunc
 }
 
 func (ec *ElementSharesController) Init() {
@@ -208,6 +208,7 @@ func (ec *ElementSharesController) exchangeElementShare(ctx echo.Context) error 
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
 		"status":   "ok",
 		"shareId":  share.Id,
+		"title":    share.Title,
 		"role":     role,
 		"anonName": share.AnonName,
 		"cluster":  json.RawMessage(share.Cluster),
@@ -247,24 +248,24 @@ func (ec *ElementSharesController) getElementShare(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]interface{}{
-		"id":          share.Id,
-		"title":       share.Title,
-		"type":        share.Type,
-		"rootIds":     share.RootIds,
-		"cluster":     json.RawMessage(share.Cluster),
+		"id":           share.Id,
+		"title":        share.Title,
+		"type":         share.Type,
+		"rootIds":      share.RootIds,
+		"cluster":      json.RawMessage(share.Cluster),
 		"audienceKind": share.AudienceKind,
-		"audienceIds": share.AudienceIds,
-		"role":        share.Role,
-		"createdBy":   share.CreatedBy,
-		"sourceDagId": share.SourceDagId,
-		"expiresAt":   share.ExpiresAt,
-		"revoked":     share.Revoked,
-		"catalog":     share.Catalog,
-		"tags":        share.Tags,
-		"importedBy":  share.ImportedBy,
-		"jti":         share.Jti,
-		"anonName":    share.AnonName,
-		"createdAt":   share.CreatedAt,
+		"audienceIds":  share.AudienceIds,
+		"role":         share.Role,
+		"createdBy":    share.CreatedBy,
+		"sourceDagId":  share.SourceDagId,
+		"expiresAt":    share.ExpiresAt,
+		"revoked":      share.Revoked,
+		"catalog":      share.Catalog,
+		"tags":         share.Tags,
+		"importedBy":   share.ImportedBy,
+		"jti":          share.Jti,
+		"anonName":     share.AnonName,
+		"createdAt":    share.CreatedAt,
 	})
 }
 
@@ -432,7 +433,9 @@ func detectType(diagramJSON string, rootIds []string) string {
 		return "cluster"
 	}
 	var wrapper struct {
-		Nodes []struct{ V string `json:"v"` } `json:"nodes"`
+		Nodes []struct {
+			V string `json:"v"`
+		} `json:"nodes"`
 		Edges []struct {
 			Value map[string]interface{} `json:"value"`
 		} `json:"edges"`

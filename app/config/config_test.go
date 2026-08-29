@@ -103,3 +103,63 @@ redirect_url = "http://localhost:5173/auth/callback"
 		t.Errorf("GitHub = %+v", cfg.GitHub)
 	}
 }
+
+func TestEnvOverridesBeatTomlValues(t *testing.T) {
+	body := `
+[samus]
+frontend_origin = "http://localhost:5173"
+cookie_secure = false
+
+[google]
+client_id = "toml-google-id"
+client_secret = "toml-google-secret"
+
+[github]
+client_id = "toml-github-id"
+client_secret = "toml-github-secret"
+`
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	t.Setenv("D3D_GOOGLE_CLIENT_SECRET", "env-google-secret")
+	t.Setenv("D3D_GITHUB_CLIENT_ID", "env-github-id")
+	t.Setenv("D3D_FRONTEND_ORIGIN", "https://d3dweb.vercel.app")
+	t.Setenv("D3D_COOKIE_SECURE", "true")
+
+	cfg := BuildConfig(path)
+
+	if cfg.Google.ClientSecret != "env-google-secret" {
+		t.Errorf("Google.ClientSecret = %q, want the env value", cfg.Google.ClientSecret)
+	}
+	// Unset vars must leave the TOML value alone.
+	if cfg.Google.ClientID != "toml-google-id" {
+		t.Errorf("Google.ClientID = %q, want the toml value", cfg.Google.ClientID)
+	}
+	if cfg.GitHub.ClientID != "env-github-id" {
+		t.Errorf("GitHub.ClientID = %q, want the env value", cfg.GitHub.ClientID)
+	}
+	if cfg.Samus.FrontendOrigin != "https://d3dweb.vercel.app" {
+		t.Errorf("FrontendOrigin = %q", cfg.Samus.FrontendOrigin)
+	}
+	if !cfg.Samus.CookieSecure {
+		t.Error("CookieSecure = false, want true from D3D_COOKIE_SECURE")
+	}
+}
+
+func TestEmptyEnvVarDoesNotClobberToml(t *testing.T) {
+	body := "[google]\nclient_id = \"toml-google-id\"\n"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// An empty variable is not a value. Treating "" as an override would wipe
+	// working config on any host that exports the name blank.
+	t.Setenv("D3D_GOOGLE_CLIENT_ID", "")
+
+	if got := BuildConfig(path).Google.ClientID; got != "toml-google-id" {
+		t.Errorf("Google.ClientID = %q, want the toml value preserved", got)
+	}
+}

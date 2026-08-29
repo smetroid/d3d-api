@@ -2,6 +2,8 @@ package config
 
 import (
 	"log"
+	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 	"github.com/smetroid/d3d-api/app/auth/ldap"
@@ -59,9 +61,36 @@ func BuildConfig(configFile string) (config SamusConfig) {
 		log.Fatal("config file error: " + err.Error())
 	}
 
+	applyEnvOverrides(&config)
 	mergePostgresConfig(&config)
 	setDefaultConfigs(&config)
 	return
+}
+
+// applyEnvOverrides lets the deployment supply the values that differ per
+// environment without committing them. TOML stays the default; an environment
+// variable wins only when set AND non-empty, so a host that exports a name
+// blank cannot wipe working configuration.
+func applyEnvOverrides(cfg *SamusConfig) {
+	overrideString(&cfg.Google.ClientID, "D3D_GOOGLE_CLIENT_ID")
+	overrideString(&cfg.Google.ClientSecret, "D3D_GOOGLE_CLIENT_SECRET")
+	overrideString(&cfg.Google.RedirectURL, "D3D_GOOGLE_REDIRECT_URL")
+	overrideString(&cfg.GitHub.ClientID, "D3D_GITHUB_CLIENT_ID")
+	overrideString(&cfg.GitHub.ClientSecret, "D3D_GITHUB_CLIENT_SECRET")
+	overrideString(&cfg.GitHub.RedirectURL, "D3D_GITHUB_REDIRECT_URL")
+	overrideString(&cfg.Samus.FrontendOrigin, "D3D_FRONTEND_ORIGIN")
+
+	if v := os.Getenv("D3D_COOKIE_SECURE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Samus.CookieSecure = b
+		}
+	}
+}
+
+func overrideString(target *string, envName string) {
+	if v := os.Getenv(envName); v != "" {
+		*target = v
+	}
 }
 
 // mergePostgresConfig lets a [postgresql] section stand in for [postgres].

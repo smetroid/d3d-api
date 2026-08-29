@@ -44,24 +44,38 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	// Middleware
 	//e.Use(middleware.Recover())
+	// A single explicit origin, not "*": credentialed requests are rejected by
+	// browsers when the allowed origin is a wildcard.
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		//AllowOrigins: []string{"http://192.168.1.4:3000", "http://192.168.1.4:8081"},
-		AllowOrigins: []string{"*"},
-		//AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
-		AllowHeaders: []string{"*"},
+		AllowOrigins:     []string{config.Samus.FrontendOrigin},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowCredentials: true,
 	}))
 
 	authProvider := BuildAuthProvider(config)
 	authMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
 		SigningKey:  []byte(config.Samus.SigningKey),
-		TokenLookup: "header:Authorization,query:api-key,query:token",
+		TokenLookup: "header:Authorization,query:api-key,query:token,cookie:jwt_token",
 	})
 
 	authController := controllers.AuthController{
 		Echo:         e,
 		AuthProvider: authProvider,
+		SigningKey:   config.Samus.SigningKey,
+		CookieSecure: config.Samus.CookieSecure,
 	}
 	authController.Init()
+
+	socialAuthController := controllers.SocialAuthController{
+		Echo:           e,
+		DB:             db,
+		SigningKey:     config.Samus.SigningKey,
+		CookieSecure:   config.Samus.CookieSecure,
+		Google:         config.Google,
+		GitHub:         config.GitHub,
+		AuthMiddleware: authMiddleware,
+	}
+	socialAuthController.Init()
 
 	dagService := services.DAGService{
 		DB: db,

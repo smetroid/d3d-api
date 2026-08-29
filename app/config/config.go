@@ -19,6 +19,17 @@ type SamusConfig struct {
 	// PostgreSQL is an alias section ([postgresql]) accepted for configs
 	// that spell out discrete connection fields; see mergePostgresConfig.
 	PostgreSQL postgres.Postgres `toml:"postgresql"`
+
+	Google SocialProvider `toml:"google"`
+	GitHub SocialProvider `toml:"github"`
+}
+
+// SocialProvider holds one OAuth application's credentials. Empty ClientID
+// means the provider is not configured and its routes return 501.
+type SocialProvider struct {
+	ClientID     string `toml:"client_id"`
+	ClientSecret string `toml:"client_secret"`
+	RedirectURL  string `toml:"redirect_url"`
 }
 
 type samus struct {
@@ -34,6 +45,11 @@ type samus struct {
 	TLSKey          string `toml:"tls_key"`
 	TLSAutoEnabled  bool   `toml:"tls_auto_enabled"`
 	TLSAutoHosts    string `toml:"tls_auto_hosts"`
+
+	// FrontendOrigin is the single allowed CORS origin and the base for OAuth
+	// redirect URLs. CookieSecure is false only for plain-HTTP local dev.
+	FrontendOrigin string `toml:"frontend_origin"`
+	CookieSecure   bool   `toml:"cookie_secure"`
 }
 
 func BuildConfig(configFile string) (config SamusConfig) {

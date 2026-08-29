@@ -30,6 +30,12 @@
     log_node_requests = false
     log_menu_requests = false
 
+    # The single allowed CORS origin and the base for OAuth redirect URLs.
+    frontend_origin = "http://localhost:5173"
+
+    # False only for plain-HTTP local dev; must be true in production.
+    cookie_secure   = false
+
 [postgres]
     # Matches the container started by `make postgres-start`, which creates
     # this database via POSTGRES_DB. Schema is applied automatically: Init
@@ -39,3 +45,19 @@
     # When unset, the DSN falls back to a passwordless postgres://localhost
     # connection that will not authenticate against that container.
     dsn = "postgres://postgres:postgres@localhost:5432/samus?sslmode=disable"
+
+[google]
+    # Empty client_id/client_secret means Google login is disabled; its
+    # routes return 501. Fill in from the Google Cloud Console for local
+    # testing but never commit real values here (this file is tracked).
+    client_id     = ""
+    client_secret = ""
+    redirect_url  = "http://localhost:5173/auth/callback"
+
+[github]
+    # Empty client_id/client_secret means GitHub login is disabled; its
+    # routes return 501. Fill in from a GitHub OAuth App for local testing
+    # but never commit real values here (this file is tracked).
+    client_id     = ""
+    client_secret = ""
+    redirect_url  = "http://localhost:5173/auth/callback"

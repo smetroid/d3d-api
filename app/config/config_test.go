@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func writeTempConfig(t *testing.T, content string) string {
@@ -59,5 +61,45 @@ func TestBuildConfigPostgresWinsOverAlias(t *testing.T) {
 	want := "postgres://explicit@db:5432/samus"
 	if got := cfg.Postgres.EffectiveDSN(); got != want {
 		t.Errorf("EffectiveDSN() = %q, want %q", got, want)
+	}
+}
+
+func TestDecodesSocialProviderBlocks(t *testing.T) {
+	body := `
+[samus]
+frontend_origin = "http://localhost:5173"
+cookie_secure = false
+
+[google]
+client_id = "g-id"
+client_secret = "g-secret"
+redirect_url = "http://localhost:5173/auth/callback"
+
+[github]
+client_id = "gh-id"
+client_secret = "gh-secret"
+redirect_url = "http://localhost:5173/auth/callback"
+`
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	var cfg SamusConfig
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if cfg.Samus.FrontendOrigin != "http://localhost:5173" {
+		t.Errorf("FrontendOrigin = %q", cfg.Samus.FrontendOrigin)
+	}
+	if cfg.Samus.CookieSecure {
+		t.Error("CookieSecure = true, want false")
+	}
+	if cfg.Google.ClientID != "g-id" || cfg.Google.ClientSecret != "g-secret" {
+		t.Errorf("Google = %+v", cfg.Google)
+	}
+	if cfg.GitHub.ClientID != "gh-id" || cfg.GitHub.RedirectURL == "" {
+		t.Errorf("GitHub = %+v", cfg.GitHub)
 	}
 }

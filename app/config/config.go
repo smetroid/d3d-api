@@ -79,6 +79,7 @@ func applyEnvOverrides(cfg *SamusConfig) {
 	overrideString(&cfg.GitHub.ClientSecret, "D3D_GITHUB_CLIENT_SECRET")
 	overrideString(&cfg.GitHub.RedirectURL, "D3D_GITHUB_REDIRECT_URL")
 	overrideString(&cfg.Samus.FrontendOrigin, "D3D_FRONTEND_ORIGIN")
+	overrideString(&cfg.Samus.SigningKey, "D3D_SIGNING_KEY")
 
 	if v := os.Getenv("D3D_COOKIE_SECURE"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {

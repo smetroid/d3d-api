@@ -163,3 +163,31 @@ func TestEmptyEnvVarDoesNotClobberToml(t *testing.T) {
 		t.Errorf("Google.ClientID = %q, want the toml value preserved", got)
 	}
 }
+
+func TestSigningKeyEnvOverride(t *testing.T) {
+	body := "[samus]\nsigning_key = \"toml-key\"\n"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	t.Setenv("D3D_SIGNING_KEY", "env-key")
+	if got := BuildConfig(path).Samus.SigningKey; got != "env-key" {
+		t.Errorf("SigningKey = %q, want the env value", got)
+	}
+}
+
+// A blank variable must not empty the signing key — app.go:211 log.Fatals on
+// an empty key, so clobbering it here would stop the service from booting.
+func TestBlankSigningKeyEnvDoesNotClobberToml(t *testing.T) {
+	body := "[samus]\nsigning_key = \"toml-key\"\n"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	t.Setenv("D3D_SIGNING_KEY", "")
+	if got := BuildConfig(path).Samus.SigningKey; got != "toml-key" {
+		t.Errorf("SigningKey = %q, want the toml value preserved", got)
+	}
+}

@@ -49,7 +49,7 @@
 # Production supplies these via environment variables, which override any value
 # here: D3D_GOOGLE_CLIENT_ID, D3D_GOOGLE_CLIENT_SECRET, D3D_GOOGLE_REDIRECT_URL,
 # D3D_GITHUB_CLIENT_ID, D3D_GITHUB_CLIENT_SECRET, D3D_GITHUB_REDIRECT_URL,
-# D3D_FRONTEND_ORIGIN, D3D_COOKIE_SECURE. Never commit real credentials.
+# D3D_FRONTEND_ORIGIN, D3D_COOKIE_SECURE, D3D_SIGNING_KEY. Never commit real credentials.
 [google]
     # Empty client_id/client_secret means Google login is disabled; its
     # routes return 501. Fill in from the Google Cloud Console for local

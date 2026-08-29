@@ -1,17 +1,66 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/google/uuid"
 	"github.com/labstack/echo"
 	"github.com/smetroid/d3d-api/app/auth/socialauth"
+	"github.com/smetroid/d3d-api/app/auth/token"
 	"github.com/smetroid/d3d-api/app/config"
+	"github.com/smetroid/d3d-api/app/db/postgres"
+	"github.com/smetroid/d3d-api/app/models"
 )
+
+// newSocialDBController opens the repository on TEST_DATABASE_URL and clears
+// the users table so each DB-backed test starts clean. It follows the same
+// shape as newTestController in element_shares_test.go.
+func newSocialDBController(t *testing.T) *SocialAuthController {
+	t.Helper()
+	dsn := os.Getenv(testDSNEnv)
+	if dsn == "" {
+		t.Skipf("%s not set; skipping controller integration tests", testDSNEnv)
+	}
+	p := &postgres.Postgres{DSN: dsn}
+	if err := p.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	t.Cleanup(func() { p.Pool().Close() })
+
+	if _, err := p.Pool().Exec(context.Background(), `TRUNCATE users CASCADE`); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	return &SocialAuthController{DB: p, SigningKey: testSigningKey}
+}
+
+// authedContext parses raw into a *jwt.Token and installs it under the
+// "user" context key the way the JWT middleware would, per the pattern in
+// app/controllers/dag.go:215-228.
+func authedContext(t *testing.T, e *echo.Echo, req *http.Request, rec *httptest.ResponseRecorder, raw string) echo.Context {
+	t.Helper()
+	tok, err := jwt.Parse(raw, func(tt *jwt.Token) (interface{}, error) {
+		if _, ok := tt.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method %v", tt.Header["alg"])
+		}
+		return []byte(testSigningKey), nil
+	})
+	if err != nil || !tok.Valid {
+		t.Fatalf("parse token: %v", err)
+	}
+	ctx := e.NewContext(req, rec)
+	ctx.Set("user", tok)
+	return ctx
+}
 
 func newSocialController() *SocialAuthController {
 	return &SocialAuthController{
@@ -153,5 +202,99 @@ func TestSetSessionCookieAttributes(t *testing.T) {
 	}
 	if c.MaxAge != int(SessionTTL.Seconds()) {
 		t.Errorf("MaxAge = %d, want %d", c.MaxAge, int(SessionTTL.Seconds()))
+	}
+}
+
+func TestMeReturnsAuthenticatedUser(t *testing.T) {
+	sac := newSocialDBController(t)
+
+	username := "me-happy-" + uuid.New().String()
+	if err := sac.DB.CreateUser(models.User{Username: username, PasswordHash: "hash", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	raw := token.CreateExpiringToken(username, testSigningKey, SessionTTL, "localauth")
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	ctx := authedContext(t, e, req, rec, raw)
+
+	if err := sac.me(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	if strings.Contains(rec.Body.String(), "hash") {
+		t.Errorf("response body leaks password_hash: %s", rec.Body.String())
+	}
+
+	var out struct {
+		User models.User `json:"user"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.User.Username != username {
+		t.Errorf("username = %q, want %q", out.User.Username, username)
+	}
+}
+
+func TestMeRejectsUnknownUser(t *testing.T) {
+	sac := newSocialDBController(t)
+
+	username := "me-ghost-" + uuid.New().String()
+	raw := token.CreateExpiringToken(username, testSigningKey, SessionTTL, "localauth")
+
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	ctx := authedContext(t, e, req, rec, raw)
+
+	if err := sac.me(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (user deleted after token was issued), body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMeRejectsMissingToken(t *testing.T) {
+	sac := newSocialController()
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/auth/me", nil), rec)
+
+	if err := sac.me(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestProviderURLRejectsUnconfiguredCredentials(t *testing.T) {
+	sac := &SocialAuthController{
+		SigningKey:   testSigningKey,
+		CookieSecure: true,
+		Google:       config.SocialProvider{RedirectURL: "http://localhost:5173/auth/callback"},
+		GitHub:       config.SocialProvider{RedirectURL: "http://localhost:5173/auth/callback"},
+	}
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodGet, "/auth/github/url", nil), rec)
+	ctx.SetParamNames("provider")
+	ctx.SetParamValues("github")
+
+	if err := sac.providerURL(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (github is a known name but has no ClientID configured)", rec.Code)
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Error("no cookie may be set for an unconfigured provider")
 	}
 }

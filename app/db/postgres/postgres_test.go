@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/smetroid/d3d-api/app/auth/socialauth"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
@@ -856,5 +857,81 @@ func TestGetUserReturnsLocalProviderDefaults(t *testing.T) {
 	}
 	if got.ProviderID != "" || got.Email != "" || got.DisplayName != "" {
 		t.Errorf("expected empty social fields, got %+v", got)
+	}
+}
+
+func TestUpsertSocialUserCreatesThenUpdates(t *testing.T) {
+	p := newTestPostgres(t)
+
+	profile := socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "583231",
+		Email:       "me@example.com",
+		DisplayName: "Enrique Carranco",
+		Username:    "smetroid",
+	}
+
+	created, err := p.UpsertSocialUser(profile)
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if created.Username != "github:smetroid" {
+		t.Errorf("Username = %q, want %q", created.Username, "github:smetroid")
+	}
+	if created.Id == "" {
+		t.Error("expected a generated id")
+	}
+
+	// A second login must return the same row with refreshed profile data.
+	profile.DisplayName = "E. Carranco"
+	profile.Email = "new@example.com"
+	updated, err := p.UpsertSocialUser(profile)
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if updated.Id != created.Id {
+		t.Errorf("id changed on re-login: %q -> %q", created.Id, updated.Id)
+	}
+	if updated.DisplayName != "E. Carranco" || updated.Email != "new@example.com" {
+		t.Errorf("profile not refreshed: %+v", updated)
+	}
+}
+
+func TestUpsertSocialUserDoesNotCollideWithLocalAccount(t *testing.T) {
+	p := newTestPostgres(t)
+
+	// A local account already owns the bare handle.
+	local := models.User{
+		Id:           uuid.New().String(),
+		Username:     "smetroid",
+		PasswordHash: "hash",
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	if err := p.CreateUser(local); err != nil {
+		t.Fatalf("create local: %v", err)
+	}
+
+	social, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "583231",
+		Username:   "smetroid",
+	})
+	if err != nil {
+		t.Fatalf("upsert must not collide with the local account: %v", err)
+	}
+	if social.Id == local.Id {
+		t.Fatal("social login must never adopt an existing local account")
+	}
+}
+
+func TestGetUserByProviderMissingReturnsZero(t *testing.T) {
+	p := newTestPostgres(t)
+
+	got, err := p.GetUserByProvider("github", "nobody")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Id != "" {
+		t.Errorf("expected zero User, got %+v", got)
 	}
 }

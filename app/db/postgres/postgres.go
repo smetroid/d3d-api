@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
+	"github.com/smetroid/d3d-api/app/auth/socialauth"
 	"github.com/smetroid/d3d-api/app/models"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -816,6 +817,60 @@ func (p *Postgres) UpdateUserPassword(username, passwordHash string) error {
 		return fmt.Errorf("user %q not found", username)
 	}
 	return nil
+}
+
+// ─── Social users ───────────────────────────────────────────────────────────
+
+// SocialUsername namespaces a provider handle so a social account can never
+// collide with — or be mistaken for — a local one. UNIQUE(username) then holds
+// by construction, with no retry loop.
+func SocialUsername(provider, handle string) string {
+	return provider + ":" + handle
+}
+
+const socialUserColumns = `id, username, password_hash, created_at,
+	provider, provider_id, email, display_name`
+
+// GetUserByProvider finds a user by their provider identity. A missing user is
+// not an error: it returns the zero User and nil, matching GetUser.
+func (p *Postgres) GetUserByProvider(provider, providerID string) (models.User, error) {
+	var u models.User
+	err := p.pool.QueryRow(context.Background(), `
+		SELECT `+socialUserColumns+`
+		FROM users WHERE provider = $1 AND provider_id = $2 LIMIT 1`,
+		provider, providerID).Scan(
+		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
+		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.User{}, nil
+	}
+	return u, err
+}
+
+// UpsertSocialUser creates the account on first OAuth login and returns the
+// existing row on later logins, refreshing the mutable profile fields.
+//
+// The conflict target is (provider, provider_id) only. Matching on email would
+// let an unverified provider address take over a local account, so a social
+// login never adopts an existing local user.
+func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (models.User, error) {
+	var u models.User
+	err := p.pool.QueryRow(context.Background(), `
+		INSERT INTO users (id, username, password_hash, created_at,
+		                   provider, provider_id, email, display_name)
+		VALUES ($1, $2, '', $3, $4, $5, $6, $7)
+		ON CONFLICT (provider, provider_id) WHERE provider != 'local'
+		DO UPDATE SET email        = EXCLUDED.email,
+		              display_name = EXCLUDED.display_name
+		RETURNING `+socialUserColumns,
+		uuid.New().String(),
+		SocialUsername(profile.Provider, profile.Username),
+		time.Now().UTC(),
+		profile.Provider, profile.ProviderID, profile.Email, profile.DisplayName,
+	).Scan(
+		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
+		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
+	return u, err
 }
 
 // ─── History ────────────────────────────────────────────────────────────────

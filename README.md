@@ -211,8 +211,25 @@ GitHub Actions drives quality gates and deploys:
 |---|---|---|
 | `.github/workflows/ci.yml` | every PR + push to `main` | gitleaks secret scan, golangci-lint, `go test -race` against a Postgres 16 service container (`TEST_DATABASE_URL`), `CGO_ENABLED=0 go build`, `go vet`, `go mod tidy` drift check |
 | `.github/workflows/deploy.yml` | push to `main` | build image → push to GHCR (`ghcr.io/smetroid/d3d-api`) → `flyctl deploy` |
+| `.github/workflows/vercel-registry-prune.yml` | daily at 06:00 UTC + manual dispatch | delete all but the 25 newest images in the Vercel container registry |
 
 Repository secrets required for deploy: `FLY_API_TOKEN` (from `flyctl auth token` or the Fly dashboard). GHCR auth uses the automatic `GITHUB_TOKEN`; no extra secret needed.
+
+### Vercel container registry pruning
+
+Vercel deployments push one image per commit to the project's registry repository, and nothing removes the old ones. The repository has a hard cap on image count; once it is reached, every build fails at the push step with `denied: repository has reached the maximum allowed number of images` — the image builds fine, only the upload is rejected.
+
+The prune workflow keeps the 25 newest images and deletes the rest. The rule is count-based rather than age-based because the cap itself is a count: "older than N days" can still overflow during a burst of deployments. Deleting an image does not delete its deployment, but rolling back to a deployment whose image is gone requires a rebuild.
+
+The same logic runs locally when a build is blocked and you do not want to wait for the schedule:
+
+```bash
+DRY_RUN=1 scripts/prune-vercel-images.sh   # report only
+scripts/prune-vercel-images.sh             # prune to the newest 25
+KEEP=10 scripts/prune-vercel-images.sh     # keep fewer
+```
+
+Repository secret required: `VERCEL_TOKEN`, created at <https://vercel.com/account/tokens> and scoped to the `smetroids-projects` team. Locally the script uses your `vercel login` session instead.
 
 Branch protection on `main` should require the `CI` workflow to pass before merging.
 

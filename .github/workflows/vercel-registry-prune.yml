@@ -1,0 +1,60 @@
+name: Prune Vercel registry
+
+# Each deployment pushes a new image to the project's container registry and
+# nothing removes the old ones. Once the repository hits its image cap, every
+# build fails at the push step, so this keeps the newest images and drops the
+# rest. Vercel deploys through its own Git integration rather than Actions,
+# which is why this runs on a schedule instead of after a deploy job.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Number of newest images to keep'
+        required: false
+        default: '25'
+      dry_run:
+        description: 'Report what would be deleted without deleting it'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: vercel-registry-prune
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: Prune old images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@59
+
+      - name: Prune
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT: d3d-api
+          VERCEL_SCOPE: smetroids-projects
+          VCR_REPOSITORY: dockerfile
+          KEEP: ${{ inputs.keep || '25' }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::VERCEL_TOKEN secret is not set. Create a token at" \
+                 "https://vercel.com/account/tokens scoped to $VERCEL_SCOPE" \
+                 "and add it as a repository secret."
+            exit 1
+          fi
+          ./scripts/prune-vercel-images.sh

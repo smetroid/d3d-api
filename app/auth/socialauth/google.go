@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -41,19 +40,16 @@ func FetchGoogleProfile(ctx context.Context, cfg *oauth2.Config, code string) (S
 		return SocialUserProfile{}, fmt.Errorf("google userinfo: %w", err)
 	}
 
-	// Google has no handle, so derive one from the email local part and fall
-	// back to the opaque id when the account exposes no address.
-	username := body.ID
-	if at := strings.Index(body.Email, "@"); at > 0 {
-		username = body.Email[:at]
-	}
-
+	// Username is the account's stable id (its OpenID "sub"), not the email
+	// local part: an email local part is not unique across domains (ada@gmail.com
+	// vs ada@work.com would collide), and emails can change on a Google account
+	// while the id cannot. Using the id keeps UNIQUE(username) safe by construction.
 	return SocialUserProfile{
 		Provider:    "google",
 		ProviderID:  body.ID,
 		Email:       body.Email,
 		DisplayName: body.Name,
-		Username:    username,
+		Username:    body.ID,
 	}, nil
 }
 

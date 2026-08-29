@@ -60,14 +60,14 @@ func TestFetchGoogleProfile(t *testing.T) {
 		ProviderID:  "g-123",
 		Email:       "ada@example.com",
 		DisplayName: "Ada Lovelace",
-		Username:    "ada",
+		Username:    "g-123",
 	}
 	if got != want {
 		t.Errorf("profile = %+v, want %+v", got, want)
 	}
 }
 
-func TestFetchGoogleProfileFallsBackToIDWhenEmailMissing(t *testing.T) {
+func TestFetchGoogleProfileToleratesMissingEmail(t *testing.T) {
 	srv := oauthServer(t, map[string]string{
 		"/userinfo": `{"id":"g-456","name":"No Mail"}`,
 	})
@@ -79,6 +79,35 @@ func TestFetchGoogleProfileFallsBackToIDWhenEmailMissing(t *testing.T) {
 	}
 	if got.Username != "g-456" {
 		t.Errorf("Username = %q, want the provider id as fallback", got.Username)
+	}
+	if got.Email != "" {
+		t.Errorf("Email = %q, want empty", got.Email)
+	}
+}
+
+// Two Google accounts sharing an email local part must not collide: the
+// username is derived from the id, so UNIQUE(username) holds by construction.
+func TestFetchGoogleProfileUsernamesAreUniquePerAccount(t *testing.T) {
+	srvA := oauthServer(t, map[string]string{
+		"/userinfo": `{"id":"g-111","email":"ada@gmail.com","name":"Ada One"}`,
+	})
+	googleUserInfoURL = srvA.URL + "/userinfo"
+	a, err := FetchGoogleProfile(context.Background(), testConfig(srvA), "code-1")
+	if err != nil {
+		t.Fatalf("fetch a: %v", err)
+	}
+
+	srvB := oauthServer(t, map[string]string{
+		"/userinfo": `{"id":"g-222","email":"ada@work.com","name":"Ada Two"}`,
+	})
+	googleUserInfoURL = srvB.URL + "/userinfo"
+	b, err := FetchGoogleProfile(context.Background(), testConfig(srvB), "code-1")
+	if err != nil {
+		t.Fatalf("fetch b: %v", err)
+	}
+
+	if a.Username == b.Username {
+		t.Fatalf("two accounts sharing an email local part collided on username %q", a.Username)
 	}
 }
 

@@ -685,20 +685,20 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 	aliceGroupIds := []string{grpID}
 
 	// Shares that MUST appear in alice's inbox.
-	wantUserFromBob  := makeShare("user",    []string{"alice"}, "bob",   false, time.Time{})
-	wantUserSelf     := makeShare("user",    []string{"alice"}, "alice", false, time.Time{}) // "Me" self-share
-	wantCompany      := makeShare("company", []string{coID},    "bob",   false, time.Time{})
-	wantGroup        := makeShare("group",   []string{grpID},   "bob",   false, time.Time{})
+	wantUserFromBob := makeShare("user", []string{"alice"}, "bob", false, time.Time{})
+	wantUserSelf := makeShare("user", []string{"alice"}, "alice", false, time.Time{}) // "Me" self-share
+	wantCompany := makeShare("company", []string{coID}, "bob", false, time.Time{})
+	wantGroup := makeShare("group", []string{grpID}, "bob", false, time.Time{})
 
 	// Shares that must NOT appear.
-	makeShare("public",  nil,               "bob",   false, time.Time{})           // public → catalog only
-	makeShare("user",    []string{"carol"},  "bob",   false, time.Time{})           // different user
-	makeShare("company", []string{"other"},  "bob",   false, time.Time{})           // different company
-	makeShare("group",   []string{"other"},  "bob",   false, time.Time{})           // different group
-	makeShare("company", []string{coID},    "alice", false, time.Time{})           // own company broadcast
-	makeShare("group",   []string{grpID},   "alice", false, time.Time{})           // own group broadcast
-	makeShare("public",  nil,               "bob",   true,  time.Time{})           // revoked
-	makeShare("public",  nil,               "bob",   false, now.Add(-time.Hour))   // expired
+	makeShare("public", nil, "bob", false, time.Time{})                // public → catalog only
+	makeShare("user", []string{"carol"}, "bob", false, time.Time{})    // different user
+	makeShare("company", []string{"other"}, "bob", false, time.Time{}) // different company
+	makeShare("group", []string{"other"}, "bob", false, time.Time{})   // different group
+	makeShare("company", []string{coID}, "alice", false, time.Time{})  // own company broadcast
+	makeShare("group", []string{grpID}, "alice", false, time.Time{})   // own group broadcast
+	makeShare("public", nil, "bob", true, time.Time{})                 // revoked
+	makeShare("public", nil, "bob", false, now.Add(-time.Hour))        // expired
 
 	shares, err := p.ListInboxShares("alice", aliceCompanyIds, aliceGroupIds)
 	if err != nil {
@@ -785,10 +785,10 @@ func TestPostgres_ListCatalogShares(t *testing.T) {
 	}
 
 	wantID := makeShare(true, "public", false, future, "Auth cluster")
-	makeShare(false, "public", false, future, "")       // catalog=false → excluded
-	makeShare(true, "public", true,  future, "")        // revoked → excluded
+	makeShare(false, "public", false, future, "")             // catalog=false → excluded
+	makeShare(true, "public", true, future, "")               // revoked → excluded
 	makeShare(true, "public", false, now.Add(-time.Hour), "") // expired → excluded
-	makeShare(true, "user",   false, future, "")        // non-public → excluded
+	makeShare(true, "user", false, future, "")                // non-public → excluded
 
 	rows, err := p.ListCatalogShares(10)
 	if err != nil {
@@ -831,5 +831,30 @@ func TestPostgres_GetElementShare_Title(t *testing.T) {
 	}
 	if got.Title != "My titled share" {
 		t.Errorf("expected title %q, got %q", "My titled share", got.Title)
+	}
+}
+
+func TestGetUserReturnsLocalProviderDefaults(t *testing.T) {
+	p := newTestPostgres(t)
+
+	u := models.User{
+		Id:           uuid.New().String(),
+		Username:     "alice",
+		PasswordHash: "hash",
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	if err := p.CreateUser(u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := p.GetUser("alice")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Provider != "local" {
+		t.Errorf("Provider = %q, want %q", got.Provider, "local")
+	}
+	if got.ProviderID != "" || got.Email != "" || got.DisplayName != "" {
+		t.Errorf("expected empty social fields, got %+v", got)
 	}
 }

@@ -795,9 +795,11 @@ func (p *Postgres) CreateUser(u models.User) error {
 func (p *Postgres) GetUser(username string) (models.User, error) {
 	var u models.User
 	err := p.pool.QueryRow(context.Background(), `
-		SELECT id, username, password_hash, created_at
+		SELECT id, username, password_hash, created_at,
+		       provider, provider_id, email, display_name
 		FROM users WHERE username = $1 LIMIT 1`, username).Scan(
-		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt)
+		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
+		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.User{}, nil
 	}

@@ -10,7 +10,7 @@ are skipped, so re-running is always safe.
 
 - A build of the Postgres-backed API (any commit on the `feat-postgresql-migration` branch).
 - Access to the running RethinkDB instance (driver port `28015`).
-- A Postgres instance reachable from the API hosts (Fly.io Postgres, or the `pg-migrate-test`
+- A Postgres instance reachable from the API hosts (Neon, via the Vercel integration, or the `pg-migrate-test`
   container for a rehearsal).
 
 ## 1. Freeze writes

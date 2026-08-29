@@ -13,11 +13,13 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/unrolled/render v1.7.0
 	golang.org/x/crypto v0.31.0
+	golang.org/x/oauth2 v0.30.0
 	gopkg.in/gorethink/gorethink.v4 v4.1.0
 	gopkg.in/ldap.v2 v2.5.1
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/bitly/go-hostpool v0.1.1 // indirect
 	github.com/bmizerany/assert v0.0.0-20160611221934-b7ed37b82869 // indirect
 	github.com/cenkalti/backoff v2.0.0+incompatible // indirect

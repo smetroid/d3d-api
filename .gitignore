@@ -35,3 +35,6 @@ samus_dev.toml
 # gin autoreload binary
 gin-bin
 .gin-bin
+
+# Subagent-driven-development scratch.
+.superpowers/

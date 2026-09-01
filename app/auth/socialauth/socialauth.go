@@ -22,6 +22,14 @@ const StateTTL = 10 * time.Minute
 // never be replayed as a state parameter, or vice versa.
 const stateIssuer = "d3d-social-state"
 
+// stateSigningKey derives a key distinct from the session signing key. The JWT
+// middleware validates any token bearing a valid signature from the session key,
+// so a state token signed with that key would be accepted as a session — and the
+// endpoint that mints them is public.
+func stateSigningKey(signingKey string) string {
+	return signingKey + ":d3d-social-state"
+}
+
 // SocialUserProfile is the provider-agnostic shape both fetchers return.
 // Username is the raw provider handle; the namespaced `provider:handle`
 // account name is built later, in the database layer.
@@ -37,7 +45,7 @@ type SocialUserProfile struct {
 // gives stateless CSRF protection: no server-side store is needed because the
 // signature and expiry alone prove we issued it recently.
 func GenerateState(signingKey string) (string, error) {
-	return token.CreateToken(signingKey, jwt.MapClaims{
+	return token.CreateToken(stateSigningKey(signingKey), jwt.MapClaims{
 		"iss": stateIssuer,
 		"exp": time.Now().Add(StateTTL).Unix(),
 		"jti": uuid.New().String(),
@@ -50,7 +58,7 @@ func ValidateState(state, signingKey string) error {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method %v", t.Header["alg"])
 		}
-		return []byte(signingKey), nil
+		return []byte(stateSigningKey(signingKey)), nil
 	})
 	if err != nil {
 		return fmt.Errorf("invalid oauth state: %w", err)

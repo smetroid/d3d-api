@@ -191,3 +191,32 @@ func TestBlankSigningKeyEnvDoesNotClobberToml(t *testing.T) {
 		t.Errorf("SigningKey = %q, want the toml value preserved", got)
 	}
 }
+
+// I2 regression: cookie_secure must fail closed. Omitting the key from the
+// TOML file entirely (the common way to "forget" it in production) must
+// still produce a Secure session cookie.
+func TestCookieSecureDefaultsToTrueWhenAbsent(t *testing.T) {
+	body := "[samus]\nfrontend_origin = \"http://localhost:5173\"\n"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if got := BuildConfig(path).Samus.CookieSecure; !got {
+		t.Error("CookieSecure = false, want true (secure-by-default) when the key is absent from the TOML file")
+	}
+}
+
+// An explicit `cookie_secure = false` (as used for plain-HTTP local dev) must
+// still be honored through BuildConfig, not just direct toml.Decode.
+func TestCookieSecureExplicitFalseIsHonoured(t *testing.T) {
+	body := "[samus]\nfrontend_origin = \"http://localhost:5173\"\ncookie_secure = false\n"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if got := BuildConfig(path).Samus.CookieSecure; got {
+		t.Error("CookieSecure = true, want false (explicit dev override) to be honored")
+	}
+}

@@ -55,6 +55,12 @@ type samus struct {
 }
 
 func BuildConfig(configFile string) (config SamusConfig) {
+	// A security flag must fail closed: default to secure cookies *before*
+	// decoding, so a TOML file that omits `cookie_secure` entirely still
+	// ships Secure cookies, while an explicit `cookie_secure = false` (dev
+	// only) still overrides it during the decode below.
+	config.Samus.CookieSecure = true
+
 	_, err := toml.DecodeFile(configFile, &config)
 
 	if err != nil {

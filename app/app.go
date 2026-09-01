@@ -24,6 +24,18 @@ func (r *RenderWrapper) Render(w io.Writer, name string, data interface{}, c ech
 }
 
 func BuildApp(config config.SamusConfig) (e *echo.Echo) {
+	// FrontendOrigin is the single allowed CORS origin. A blank value still
+	// produces a length-1 AllowOrigins slice ([""]) below, so middleware.go's
+	// "fall back to default" never fires and the origin matches nothing:
+	// every response gets an empty Access-Control-Allow-Origin and the
+	// frontend silently breaks, with no server-side diagnostic. Under the
+	// old proxy topology a missing value was harmless; under the direct
+	// topology it is total failure, so fail loudly at boot instead —
+	// mirroring the SigningKey guard in BuildAuthProvider below.
+	if config.Samus.FrontendOrigin == "" {
+		log.Fatal("Shutting down, frontend origin must be provided.")
+	}
+
 	err := config.Postgres.Init()
 	if err != nil {
 		log.Fatal(err)

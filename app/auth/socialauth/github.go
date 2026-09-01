@@ -3,6 +3,7 @@ package socialauth
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 
 	"golang.org/x/oauth2"
@@ -49,7 +50,12 @@ func FetchGitHubProfile(ctx context.Context, cfg *oauth2.Config, code string) (S
 		Verified bool   `json:"verified"`
 	}
 	// A failure here is tolerated: the profile is still usable without it.
-	_ = getJSON(ctx, client, githubEmailsURL, &emails)
+	// But it must not be indistinguishable from "no public email" — log it so
+	// a GitHub outage, 5xx, or rate-limit shows up operationally instead of
+	// silently producing empty emails for every signup.
+	if err := getJSON(ctx, client, githubEmailsURL, &emails); err != nil {
+		log.Printf("github emails fetch failed for user %d (%s): %v", user.ID, user.Login, err)
+	}
 
 	var email string
 	for _, e := range emails {

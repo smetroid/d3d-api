@@ -1,7 +1,9 @@
 package socialauth
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -153,5 +155,47 @@ func TestFetchGitHubProfileToleratesNoEmail(t *testing.T) {
 	}
 	if got.DisplayName != "ghost" {
 		t.Errorf("DisplayName = %q, want the login as fallback", got.DisplayName)
+	}
+}
+
+// TestFetchGitHubProfileLogsEmailsFetchFailure is the regression test for the
+// "Minor" whole-branch finding: a failed /user/emails fetch (outage, 5xx,
+// rate-limit) must not be indistinguishable from "this GitHub account has no
+// public email". The profile is still allowed to come back with an empty
+// Email — that part is correct and unchanged — but the failure must be
+// logged so it is operationally visible.
+func TestFetchGitHubProfileLogsEmailsFetchFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at-1","token_type":"Bearer"}`))
+	})
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":42,"login":"flaky","name":"Flaky User"}`))
+	})
+	mux.HandleFunc("/user/emails", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	githubUserURL = srv.URL + "/user"
+	githubEmailsURL = srv.URL + "/user/emails"
+
+	var logBuf bytes.Buffer
+	prevOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(prevOutput)
+
+	got, err := FetchGitHubProfile(context.Background(), testConfig(srv), "code-1")
+	if err != nil {
+		t.Fatalf("fetch must tolerate a failed emails call: %v", err)
+	}
+	if got.Email != "" {
+		t.Errorf("Email = %q, want empty", got.Email)
+	}
+	if logBuf.Len() == 0 {
+		t.Error("expected the emails fetch failure to be logged, got nothing")
 	}
 }

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -921,6 +922,98 @@ func TestUpsertSocialUserDoesNotCollideWithLocalAccount(t *testing.T) {
 	}
 	if social.Id == local.Id {
 		t.Fatal("social login must never adopt an existing local account")
+	}
+}
+
+// I5 regression: a GitHub user who renames must not permanently 500-lock a
+// later signer who claims their now-available old handle. UpsertSocialUser's
+// DO UPDATE must keep the stored username in sync with the provider, so the
+// old `provider:handle` is freed as soon as the renamed user logs back in.
+func TestUpsertSocialUserRenameFreesUsernameForReuse(t *testing.T) {
+	p := newTestPostgres(t)
+
+	original, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+	if original.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q", original.Username, "github:alice")
+	}
+
+	// The original owner renames on GitHub and logs back in: same
+	// provider_id, new handle. Without the fix, username is never updated by
+	// the ON CONFLICT DO UPDATE, so "github:alice" stays permanently claimed.
+	renamed, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("rename upsert: %v", err)
+	}
+	if renamed.Id != original.Id {
+		t.Fatalf("rename must update the existing row, got a new id: %q -> %q", original.Id, renamed.Id)
+	}
+	if renamed.Username != "github:bob" {
+		t.Fatalf("Username = %q, want %q after rename", renamed.Username, "github:bob")
+	}
+
+	// A different person now claims the freed-up "alice" handle. This is a
+	// genuinely new account (different provider_id) and must succeed, not
+	// collide with the stale username the original owner left behind.
+	newClaimant, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("reuse of freed username must succeed, got: %v", err)
+	}
+	if newClaimant.Id == renamed.Id {
+		t.Fatal("the new claimant must be a distinct account from the renamed original")
+	}
+	if newClaimant.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q", newClaimant.Username, "github:alice")
+	}
+}
+
+// I5 regression: when the username collision is genuine — a different
+// provider_id whose desired username is still actively held by another row
+// — UpsertSocialUser must return a distinct, recognizable error rather than
+// letting the underlying unique-constraint violation surface as an opaque
+// failure the caller can't act on.
+func TestUpsertSocialUserGenuineUsernameCollisionReturnsDistinctError(t *testing.T) {
+	p := newTestPostgres(t)
+
+	holder, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+
+	_, err = p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "alice",
+	})
+	if !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v, want ErrUsernameTaken", err)
+	}
+
+	// The collision must not have mutated the existing holder's row.
+	still, getErr := p.GetUserByProvider("github", "1")
+	if getErr != nil {
+		t.Fatalf("get holder: %v", getErr)
+	}
+	if still.Id != holder.Id || still.Username != "github:alice" {
+		t.Fatalf("holder row changed after failed collision: %+v", still)
 	}
 }
 

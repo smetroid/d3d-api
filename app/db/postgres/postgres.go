@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 	"github.com/smetroid/d3d-api/app/auth/socialauth"
@@ -26,6 +27,16 @@ var embedMigrations embed.FS
 
 // ErrNotFound is returned when a requested record does not exist.
 var ErrNotFound = errors.New("not found")
+
+// ErrUsernameTaken is returned by UpsertSocialUser when the namespaced
+// `provider:handle` username collides with a different existing account (see
+// UpsertSocialUser for how this can happen even though the conflict target is
+// (provider, provider_id), not username).
+var ErrUsernameTaken = errors.New("username already taken")
+
+// pgUniqueViolation is the PostgreSQL error code for a unique constraint
+// violation (23505). See https://www.postgresql.org/docs/current/errcodes-appendix.html.
+const pgUniqueViolation = "23505"
 
 const (
 	defaultDSN      = "postgres://localhost:5432/samus"
@@ -853,6 +864,23 @@ func (p *Postgres) GetUserByProvider(provider, providerID string) (models.User, 
 // The conflict target is (provider, provider_id) only. Matching on email would
 // let an unverified provider address take over a local account, so a social
 // login never adopts an existing local user.
+//
+// username is included in the DO UPDATE SET: GitHub (and, in principle, other
+// providers) let a handle be renamed and then reclaimed by someone else. When
+// the *existing* (provider, provider_id) row's owner renames on the provider
+// side, this keeps our stored username in sync on their next login.
+//
+// That still leaves the other half of the same scenario: a *different*,
+// genuinely new provider_id logging in with a username that an existing row
+// (renamed or not) already holds. That insert matches no conflict target —
+// (provider, provider_id) is new — so it proceeds to INSERT and collides with
+// the separate `users_username_key` uniqueness constraint instead. We detect
+// that specific unique-violation and surface it as ErrUsernameTaken so the
+// caller can return a real, actionable error instead of an opaque 500. A
+// suffix-retry (`github:alice-2`) was considered but rejected: it would
+// silently hand the renaming user's old identity to a stranger without their
+// knowledge, which is worse than asking them to sign in again after the
+// rightful claim settles.
 func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (models.User, error) {
 	var u models.User
 	err := p.pool.QueryRow(context.Background(), `
@@ -860,7 +888,8 @@ func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (model
 		                   provider, provider_id, email, display_name)
 		VALUES ($1, $2, '', $3, $4, $5, $6, $7)
 		ON CONFLICT (provider, provider_id) WHERE provider != 'local'
-		DO UPDATE SET email        = EXCLUDED.email,
+		DO UPDATE SET username     = EXCLUDED.username,
+		              email        = EXCLUDED.email,
 		              display_name = EXCLUDED.display_name
 		RETURNING `+socialUserColumns,
 		uuid.New().String(),
@@ -870,7 +899,14 @@ func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (model
 	).Scan(
 		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
 		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
-	return u, err
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "users_username_key" {
+			return models.User{}, ErrUsernameTaken
+		}
+		return models.User{}, err
+	}
+	return u, nil
 }
 
 // ─── History ────────────────────────────────────────────────────────────────

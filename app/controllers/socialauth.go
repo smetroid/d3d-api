@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 
 	jwt "github.com/dgrijalva/jwt-go"
@@ -109,6 +110,9 @@ func (sac *SocialAuthController) callback(ctx echo.Context) error {
 
 	user, err := sac.DB.UpsertSocialUser(profile)
 	if err != nil {
+		if errors.Is(err, postgres.ErrUsernameTaken) {
+			return ctx.JSON(http.StatusConflict, models.ErrorResponse("That username is already taken by another account"))
+		}
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse("Could not create the account"))
 	}
 

@@ -43,6 +43,36 @@ type (
 	jwtExtractor func(echo.Context) (string, error)
 )
 
+// rejectedSessionIssuers lists token issuers that must never be accepted as
+// a session credential by JWTWithConfig, even though they are signed with
+// the same session signing key and therefore pass signature verification.
+//
+// This is a deny-list, not an allow-list, deliberately. The issuer on an
+// ordinary session token is the configured auth_provider value
+// (token.CreateExpiringToken's `backend` parameter — "localauth", "ldap",
+// "oauth", "google", "github", ...), which is open-ended: a deployment can
+// configure a provider name we've never seen. An allow-list would reject
+// legitimate sessions from any provider not in it. A deny-list only needs
+// to name the small, fixed set of issuers minted for a purpose other than
+// "act as a session" — e.g. the publicly-handed-out d3d-element-share
+// catalog token and the d3d-social-state OAuth CSRF token — so it stays
+// safe as new session providers are added. Do not convert this to an
+// allow-list; that would break unanticipated auth_provider configurations.
+var rejectedSessionIssuers = map[string]bool{
+	// d3d-element-share: minted by /catalog (public, no auth) and by
+	// element share creation. Consumed by its own handler at
+	// element_shares.go's exchangeElementShare, which checks `iss` itself.
+	// Some of these tokens have no `exp` at all (non-expiring shares), so
+	// without this check a publicly obtainable, potentially-never-expiring
+	// token would be a valid session credential on every protected route.
+	"d3d-element-share": true,
+	// d3d-social-state: the OAuth CSRF state parameter, minted by
+	// socialauth.GenerateState and consumed by socialauth.ValidateState.
+	// Already key-separated (signed with a derived key), but rejected here
+	// too as belt-and-braces in case that ever changes.
+	"d3d-social-state": true,
+}
+
 type (
 	// CORSConfig defines the config for CORS middleware.
 	CORSConfig struct {
@@ -255,6 +285,11 @@ func JWTWithConfig(config JWTConfig) echo.MiddlewareFunc {
 			})
 
 			if err == nil && token.Valid {
+				if claims, ok := token.Claims.(jwt.MapClaims); ok {
+					if iss, _ := claims["iss"].(string); rejectedSessionIssuers[iss] {
+						return echo.ErrUnauthorized
+					}
+				}
 				// Store user information from token into context.
 				c.Set(config.ContextKey, token)
 				return next(c)

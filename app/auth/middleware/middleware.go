@@ -285,10 +285,21 @@ func JWTWithConfig(config JWTConfig) echo.MiddlewareFunc {
 			})
 
 			if err == nil && token.Valid {
-				if claims, ok := token.Claims.(jwt.MapClaims); ok {
-					if iss, _ := claims["iss"].(string); rejectedSessionIssuers[iss] {
-						return echo.ErrUnauthorized
-					}
+				// The rejectedSessionIssuers check below is a security
+				// control, not a convenience one, so it must fail closed:
+				// if the claims can't be read as jwt.MapClaims, we cannot
+				// verify `iss` isn't a denied issuer, so reject rather than
+				// silently letting the token through. jwt.Parse always
+				// yields jwt.MapClaims today (it calls ParseWithClaims
+				// with a jwt.MapClaims{} internally), so this branch is
+				// not reachable via this code path currently, but the
+				// default on the failure branch must still be deny.
+				claims, ok := token.Claims.(jwt.MapClaims)
+				if !ok {
+					return echo.ErrUnauthorized
+				}
+				if iss, _ := claims["iss"].(string); rejectedSessionIssuers[iss] {
+					return echo.ErrUnauthorized
 				}
 				// Store user information from token into context.
 				c.Set(config.ContextKey, token)

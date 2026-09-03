@@ -9,16 +9,21 @@ import (
 )
 
 type MenuController struct {
-	Echo            *echo.Echo
-	MenuService     services.MenuService
-	AuthMiddleware  echo.MiddlewareFunc
+	Echo           *echo.Echo
+	MenuService    services.MenuService
+	AuthMiddleware echo.MiddlewareFunc
+	// ShareMiddleware — see DAGsController's field of the same name. GET
+	// /menus is share-accessible (the editor needs it to render for share
+	// recipients) but carries no :dag parameter, so only layer 1 (route
+	// scoping) applies to it; layer 2 (resource binding) is a no-op here.
+	ShareMiddleware []echo.MiddlewareFunc
 	LogMenuRequests bool
 }
 
 func (dc *MenuController) Init() {
 	dc.Echo.POST("/menu", dc.createMenu, dc.AuthMiddleware)
 	dc.Echo.POST("/menu/:menu/update", dc.updateMenu, dc.AuthMiddleware)
-	dc.Echo.GET("/menus", dc.getMenus, dc.AuthMiddleware)
+	dc.Echo.GET("/menus", dc.getMenus, dc.ShareMiddleware...)
 	dc.Echo.GET("/menu/:menu", dc.getMenu, dc.AuthMiddleware)
 	dc.Echo.GET("/menus_options", dc.getMenusOptions, dc.AuthMiddleware)
 	dc.Echo.DELETE("/menu/:menu", dc.deleteMenu, dc.AuthMiddleware)

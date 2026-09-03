@@ -70,6 +70,24 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		TokenLookup: "header:Authorization,query:api-key,query:token,cookie:jwt_token",
 	})
 
+	// shareRouteMiddleware backs the small, explicit set of share-
+	// accessible routes (GET /dag/:dag, POST /dag/:dag/update,
+	// GET /dag/:dag/history, GET /dag/:dag/ws, GET /menus). It replaces
+	// authMiddleware — never combines with it — on those routes: layer 1
+	// (ShareJWTWithConfig) accepts both d3d-share and ordinary session
+	// tokens, and layer 2 (ShareResourceBinding) binds a d3d-share token to
+	// the requested :dag. Every other auth-gated route keeps plain
+	// authMiddleware, which now rejects d3d-share outright, so a route
+	// added later is closed to share tokens by default unless it
+	// deliberately opts into this slice instead.
+	shareRouteMiddleware := []echo.MiddlewareFunc{
+		middleware.ShareJWTWithConfig(middleware.JWTConfig{
+			SigningKey:  []byte(config.Samus.SigningKey),
+			TokenLookup: "header:Authorization,query:api-key,query:token,cookie:jwt_token",
+		}),
+		controllers.ShareResourceBinding(db),
+	}
+
 	authController := controllers.AuthController{
 		Echo:         e,
 		AuthProvider: authProvider,
@@ -108,12 +126,13 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 	hub := collab.NewHub()
 
 	dagController := controllers.DAGsController{
-		Echo:           e,
-		DAGService:     dagService,
-		Hub:            hub,
-		DB:             db,
-		AuthMiddleware: authMiddleware,
-		LogDAGRequests: config.Samus.LogDAGRequests,
+		Echo:            e,
+		DAGService:      dagService,
+		Hub:             hub,
+		DB:              db,
+		AuthMiddleware:  authMiddleware,
+		ShareMiddleware: shareRouteMiddleware,
+		LogDAGRequests:  config.Samus.LogDAGRequests,
 	}
 
 	edgeController := controllers.EdgeController{
@@ -134,6 +153,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		Echo:            e,
 		MenuService:     menuService,
 		AuthMiddleware:  authMiddleware,
+		ShareMiddleware: shareRouteMiddleware,
 		LogMenuRequests: config.Samus.LogMenuRequests,
 	}
 

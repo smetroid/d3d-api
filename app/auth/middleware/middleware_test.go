@@ -170,12 +170,16 @@ func TestJWTMiddlewareRejectsSocialStateToken(t *testing.T) {
 	assertRejected(t, handlerCalled, handlerErr)
 }
 
-// TestJWTMiddlewareAcceptsShareToken is a regression guard: a "d3d-share"
-// token (minted by shares.go for anonymous DAG share links) must continue
-// to pass the session middleware, since dag.go's shareInfoFromCtx and the
-// view-only write guard depend on it reaching the handler. Rejecting it
-// here would break every outstanding share link.
-func TestJWTMiddlewareAcceptsShareToken(t *testing.T) {
+// TestJWTMiddlewareRejectsShareToken is the regression test for the route-
+// scoping fix: a "d3d-share" token (minted by shares.go for anonymous DAG
+// share links) must NOT pass the general session middleware (JWTWithConfig,
+// backing AuthMiddleware). Share tokens are handed to untrusted external
+// recipients and must reach only the small set of share-appropriate
+// routes, which opt in via ShareJWTWithConfig (see
+// TestShareJWTMiddlewareAcceptsShareToken below) paired with resource-
+// binding middleware. Before this fix, a d3d-share token passed every
+// auth-gated route with zero role checks.
+func TestJWTMiddlewareRejectsShareToken(t *testing.T) {
 	shareToken, err := token.CreateToken(testSigningKey, jwt.MapClaims{
 		"jti":    "share-jti",
 		"iss":    "d3d-share",
@@ -188,7 +192,86 @@ func TestJWTMiddlewareAcceptsShareToken(t *testing.T) {
 	}
 
 	handlerCalled, handlerErr := runThroughMiddleware(t, shareToken)
+	assertRejected(t, handlerCalled, handlerErr)
+}
+
+// runThroughShareMiddleware is runThroughMiddleware's counterpart for
+// ShareJWTWithConfig.
+func runThroughShareMiddleware(t *testing.T, rawToken string) (handlerCalled bool, handlerErr error) {
+	t.Helper()
+
+	handler := ShareJWTWithConfig(JWTConfig{
+		SigningKey: []byte(testSigningKey),
+	})(func(c echo.Context) error {
+		handlerCalled = true
+		return c.NoContent(http.StatusOK)
+	})
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+rawToken)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	handlerErr = handler(ctx)
+	return handlerCalled, handlerErr
+}
+
+// TestShareJWTMiddlewareAcceptsShareToken proves ShareJWTWithConfig (used
+// only by share-accessible routes) accepts what the general middleware now
+// rejects.
+func TestShareJWTMiddlewareAcceptsShareToken(t *testing.T) {
+	shareToken, err := token.CreateToken(testSigningKey, jwt.MapClaims{
+		"jti":    "share-jti",
+		"iss":    "d3d-share",
+		"dag_id": "dag-id",
+		"role":   "view",
+		"exp":    time.Now().Add(7 * 24 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	handlerCalled, handlerErr := runThroughShareMiddleware(t, shareToken)
 	assertAccepted(t, handlerCalled, handlerErr)
+}
+
+// TestShareJWTMiddlewareAcceptsSessionToken proves ShareJWTWithConfig still
+// accepts ordinary session tokens — share-accessible routes must remain
+// reachable by logged-in owners, not just share recipients.
+func TestShareJWTMiddlewareAcceptsSessionToken(t *testing.T) {
+	sessionToken := token.CreateExpiringToken("alice", testSigningKey, time.Hour, "localauth")
+
+	handlerCalled, handlerErr := runThroughShareMiddleware(t, sessionToken)
+	assertAccepted(t, handlerCalled, handlerErr)
+}
+
+// TestShareJWTMiddlewareRejectsElementShareAndStateTokens proves
+// ShareJWTWithConfig's narrower allowance is only for "d3d-share": the
+// other special-purpose issuers stay denied.
+func TestShareJWTMiddlewareRejectsElementShareAndStateTokens(t *testing.T) {
+	catalogToken, err := token.CreateToken(testSigningKey, jwt.MapClaims{
+		"jti":      "share-jti",
+		"iss":      "d3d-element-share",
+		"share_id": "share-id",
+		"role":     "view",
+	})
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	handlerCalled, handlerErr := runThroughShareMiddleware(t, catalogToken)
+	assertRejected(t, handlerCalled, handlerErr)
+
+	stateToken, err := token.CreateToken(testSigningKey, jwt.MapClaims{
+		"iss": "d3d-social-state",
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+		"jti": "state-jti",
+	})
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	handlerCalled, handlerErr = runThroughShareMiddleware(t, stateToken)
+	assertRejected(t, handlerCalled, handlerErr)
 }
 
 // TestJWTMiddlewareAcceptsSessionToken is a regression guard: a normal
@@ -227,7 +310,7 @@ func TestJWTMiddlewareIssuerVerdicts(t *testing.T) {
 		{"backend: google", "google", true},
 		{"backend: github", "github", true},
 		{"samus-token-tool", "samus-token-tool", true},
-		{"d3d-share", "d3d-share", true},
+		{"d3d-share", "d3d-share", false},
 		{"d3d-element-share", "d3d-element-share", false},
 		{"d3d-social-state", "d3d-social-state", false},
 	}

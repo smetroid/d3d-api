@@ -26,17 +26,24 @@ type DAGsController struct {
 	Hub            *collab.Hub
 	DB             *postgres.Postgres
 	AuthMiddleware echo.MiddlewareFunc
-	LogDAGRequests bool
+	// ShareMiddleware gates the routes a d3d-share token may reach (layer
+	// 1: middleware.ShareJWTWithConfig) and binds it to the requested
+	// diagram (layer 2: ShareResourceBinding). It also accepts ordinary
+	// session tokens, so it replaces AuthMiddleware — never both — on the
+	// routes it's attached to. See share_scope.go's ShareResourceBinding
+	// doc comment for the full design.
+	ShareMiddleware []echo.MiddlewareFunc
+	LogDAGRequests  bool
 }
 
 func (dc *DAGsController) Init() {
 	dc.Echo.POST("/dag", dc.createDAG, dc.AuthMiddleware)
-	dc.Echo.POST("/dag/:dag/update", dc.updateDAG, dc.AuthMiddleware)
+	dc.Echo.POST("/dag/:dag/update", dc.updateDAG, dc.ShareMiddleware...)
 	dc.Echo.GET("/dags", dc.getDAGs, dc.AuthMiddleware)
-	dc.Echo.GET("/dag/:dag", dc.getDAG, dc.AuthMiddleware)
+	dc.Echo.GET("/dag/:dag", dc.getDAG, dc.ShareMiddleware...)
 	dc.Echo.DELETE("/dag/:dag", dc.deleteDAG, dc.AuthMiddleware)
-	dc.Echo.GET("/dag/:dag/ws", dc.dagWS, dc.AuthMiddleware)
-	dc.Echo.GET("/dag/:dag/history", dc.getDAGHistory, dc.AuthMiddleware)
+	dc.Echo.GET("/dag/:dag/ws", dc.dagWS, dc.ShareMiddleware...)
+	dc.Echo.GET("/dag/:dag/history", dc.getDAGHistory, dc.ShareMiddleware...)
 	dc.Echo.POST("/dag/:dag/history/:historyId/restore", dc.restoreDAGHistory, dc.AuthMiddleware)
 	dc.Echo.PATCH("/dag/:dag", dc.setPublic, dc.AuthMiddleware)
 	dc.Echo.GET("/dag/:dag/public", dc.getDAGPublic)

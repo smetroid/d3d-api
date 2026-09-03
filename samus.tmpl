@@ -1,6 +1,7 @@
 [samus]
     bind_addr = "{{ .Env.BIND_ADDR }}"
     signing_key = "{{ .Env.SIGNING_KEY }}"
+    frontend_origin = "{{ .Env.FRONTEND_ORIGIN }}"
     auth_provider = "{{ .Env.AUTH_PROVIDER }}"
     log_DAG_requests = {{ .Env.LOG_DAG_REQUESTS }}
     log_edge_requests = {{ .Env.LOG_EDGE_REQUESTS }}

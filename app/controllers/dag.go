@@ -79,6 +79,11 @@ func (dc *DAGsController) getDAG(ctx echo.Context) error {
 }
 
 func (dc *DAGsController) deleteDAG(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	err := dc.DAGService.DeleteDAG(ctx.Param("dag"))
 	return dc.StandardResponse(ctx, struct {
 		Status string `json:"status"`
@@ -189,11 +194,14 @@ func (dc *DAGsController) getDAGHistory(ctx echo.Context) error {
 }
 
 func (dc *DAGsController) restoreDAGHistory(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	dagId := ctx.Param("dag")
 	historyId := ctx.Param("historyId")
 
-	// JWT required to reach this handler; there is no ownership or
-	// share-role check beyond that.
 	err := dc.DAGService.RestoreHistory(historyId, dagId)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))

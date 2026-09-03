@@ -257,6 +257,11 @@ func usernameFromCtx(ctx echo.Context) string {
 // setPublic toggles the public embed flag for a DAG. Auth required (owner only).
 // Body: {"public": true|false}
 func (dc *DAGsController) setPublic(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	dagId := ctx.Param("dag")
 	var body struct {
 		Public bool `json:"public"`

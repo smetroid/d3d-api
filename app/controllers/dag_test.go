@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,72 @@ func TestRestoreDAGHistory_SessionTokenAllowed(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+// setPublicCtx builds an echo.Context for a PATCH /dag/:dag request with a
+// {"public": true} JSON body, carrying raw as the parsed "user" token.
+func setPublicCtx(t *testing.T, dagId, raw string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/dag/"+dagId, strings.NewReader(`{"public":true}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := authedContext(t, e, req, rec, raw)
+	ctx.SetParamNames("dag")
+	ctx.SetParamValues(dagId)
+	return ctx, rec
+}
+
+func TestSetPublic_ViewShareRejected(t *testing.T) {
+	dc := newDAGDBController(t)
+	dagId := seedDAG(t, dc)
+
+	ctx, rec := setPublicCtx(t, dagId, shareToken(t, "view"))
+	if err := dc.setPublic(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+
+	// The public flag must be unchanged — GetDAGPublic must still fail to
+	// find it, since it was never made public.
+	if _, err := dc.DAGService.GetDAGPublic(dagId); err == nil {
+		t.Errorf("GetDAGPublic after rejected setPublic: expected error, got none (diagram was made public)")
+	}
+}
+
+func TestSetPublic_EditShareAllowed(t *testing.T) {
+	dc := newDAGDBController(t)
+	dagId := seedDAG(t, dc)
+
+	ctx, rec := setPublicCtx(t, dagId, shareToken(t, "edit"))
+	if err := dc.setPublic(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if _, err := dc.DAGService.GetDAGPublic(dagId); err != nil {
+		t.Errorf("GetDAGPublic after allowed setPublic: %v", err)
+	}
+}
+
+func TestSetPublic_SessionTokenAllowed(t *testing.T) {
+	dc := newDAGDBController(t)
+	dagId := seedDAG(t, dc)
+
+	ctx, rec := setPublicCtx(t, dagId, sessionToken(t))
+	if err := dc.setPublic(ctx); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	if _, err := dc.DAGService.GetDAGPublic(dagId); err != nil {
+		t.Errorf("GetDAGPublic after allowed setPublic: %v", err)
 	}
 }

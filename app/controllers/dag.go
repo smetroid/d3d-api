@@ -192,7 +192,8 @@ func (dc *DAGsController) restoreDAGHistory(ctx echo.Context) error {
 	dagId := ctx.Param("dag")
 	historyId := ctx.Param("historyId")
 
-	// Only the diagram owner can restore (same auth as updateDAG — JWT required).
+	// JWT required to reach this handler; there is no ownership or
+	// share-role check beyond that.
 	err := dc.DAGService.RestoreHistory(historyId, dagId)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))

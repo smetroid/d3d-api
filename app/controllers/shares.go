@@ -46,6 +46,11 @@ func (sc *SharesController) Init() {
 }
 
 func (sc *SharesController) createShare(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	dagId := ctx.Param("dag")
 
 	var req models.CreateShareRequest
@@ -98,6 +103,11 @@ func (sc *SharesController) createShare(ctx echo.Context) error {
 }
 
 func (sc *SharesController) revokeShare(ctx echo.Context) error {
+	// Share tokens with view role cannot write.
+	if _, role, isShare := shareInfoFromCtx(ctx); isShare && role != "edit" {
+		return ctx.JSON(http.StatusForbidden, models.ErrorResponse("view-only share link"))
+	}
+
 	jti := ctx.Param("jti")
 	if err := sc.DB.RevokeShare(jti); err != nil {
 		return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse(err.Error()))

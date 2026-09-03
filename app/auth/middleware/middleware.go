@@ -99,9 +99,29 @@ var rejectedSessionIssuers = map[string]bool{
 // tokens (in addition to ordinary session tokens) while still denying the
 // other special-purpose issuers (d3d-element-share, d3d-social-state) that
 // must never be treated as a session credential anywhere.
-var shareAwareRejectedIssuers = map[string]bool{
-	"d3d-element-share": true,
-	"d3d-social-state":  true,
+//
+// It is DERIVED from rejectedSessionIssuers rather than written out
+// literally, and that is the whole point. rejectedSessionIssuers is
+// documented above as the place to name any new special-purpose issuer. A
+// hand-copied second list silently fails open: whoever adds "d3d-embed"
+// there per those instructions would have no way to know a duplicate
+// existed, and their new token would be accepted as a session credential on
+// GET /dag/:dag, POST /dag/:dag/update, /history, /ws and /menus. Deriving
+// it makes that drift impossible.
+var shareAwareRejectedIssuers = rejectedIssuersExcept("d3d-share")
+
+// rejectedIssuersExcept copies rejectedSessionIssuers minus the named
+// issuers. Go resolves package-level initialisation by dependency, so this
+// runs after rejectedSessionIssuers is populated.
+func rejectedIssuersExcept(allowed ...string) map[string]bool {
+	out := make(map[string]bool, len(rejectedSessionIssuers))
+	for iss := range rejectedSessionIssuers {
+		out[iss] = true
+	}
+	for _, iss := range allowed {
+		delete(out, iss)
+	}
+	return out
 }
 
 type (

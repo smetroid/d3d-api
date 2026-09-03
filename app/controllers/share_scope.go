@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/labstack/echo"
@@ -21,7 +23,10 @@ import (
 //
 // On any route carrying a :dag parameter, this middleware looks up the
 // share by its jti (Postgres.GetShareByJti) and requires the share's bound
-// dag_id to equal the requested :dag. It rejects with 403 otherwise.
+// dag_id to equal the requested :dag. It rejects with 403 otherwise. It
+// also enforces the revocation denylist (layer 3) for every share token,
+// including on the parameter-less routes, since a revoked link must not
+// reach anything.
 // Ordinary session tokens are not share tokens (shareInfoFromCtx returns
 // isShare=false for them) and pass through unconstrained — this middleware
 // only scopes share tokens, per the deliberately-deferred decision not to
@@ -44,6 +49,24 @@ func ShareResourceBinding(db *postgres.Postgres) echo.MiddlewareFunc {
 				return next(ctx)
 			}
 
+			// Layer 3: revocation. RevokeShare only writes to
+			// share_denylist — the shares row survives, so the binding
+			// check below would happily pass a revoked link. This is the
+			// only chokepoint every share-accessible route passes through,
+			// so the denylist is enforced here rather than per-handler:
+			// before this check lived here, only dagWS consulted it and a
+			// revoked link kept working on GET /dag/:dag, /history and
+			// POST /dag/:dag/update until the JWT's own exp, up to ExpDays
+			// (7) later.
+			revoked, err := db.IsRevoked(jti)
+			if err != nil {
+				log.Printf("share scope: revocation check failed for jti %s: %v", jti, err)
+				return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse("could not verify share"))
+			}
+			if revoked {
+				return ctx.JSON(http.StatusForbidden, models.ErrorResponse("share link revoked"))
+			}
+
 			dagParam := ctx.Param("dag")
 			if dagParam == "" {
 				return next(ctx)
@@ -51,7 +74,15 @@ func ShareResourceBinding(db *postgres.Postgres) echo.MiddlewareFunc {
 
 			share, err := db.GetShareByJti(jti)
 			if err != nil {
-				return ctx.JSON(http.StatusForbidden, models.ErrorResponse("invalid share"))
+				// A missing share is an authorization failure; a database
+				// that is unreachable is not. Collapsing both into 403
+				// made a Postgres restart look to recipients (and to
+				// anyone reading logs) like a permanent denial.
+				if errors.Is(err, postgres.ErrNotFound) {
+					return ctx.JSON(http.StatusForbidden, models.ErrorResponse("invalid share"))
+				}
+				log.Printf("share scope: share lookup failed for jti %s: %v", jti, err)
+				return ctx.JSON(http.StatusInternalServerError, models.ErrorResponse("could not verify share"))
 			}
 			if share.DagId != dagParam {
 				return ctx.JSON(http.StatusForbidden, models.ErrorResponse("share token not valid for this diagram"))

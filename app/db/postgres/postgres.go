@@ -759,6 +759,13 @@ func (p *Postgres) GetShareByJti(jti string) (models.Share, error) {
 		SELECT id, dag_id, jti, role, anon_name, created_by, expires_at, created_at
 		FROM shares WHERE jti = $1`, jti).Scan(
 		&s.Id, &s.DagId, &s.Jti, &s.Role, &s.AnonName, &s.CreatedBy, &s.ExpiresAt, &s.CreatedAt)
+	// Translate "no such share" into ErrNotFound, per this file's convention,
+	// so callers can tell a missing share from a database that is down. The
+	// distinction matters at the share-scoping chokepoint, where the former
+	// is an authorization failure (403) and the latter is not (500).
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Share{}, ErrNotFound
+	}
 	return s, err
 }
 

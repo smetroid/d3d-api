@@ -37,6 +37,14 @@ type DAGsController struct {
 }
 
 func (dc *DAGsController) Init() {
+	// A nil ShareMiddleware would expand to zero middleware, publishing these
+	// share-accessible routes with no authentication at all — a silent
+	// fail-open, unlike a nil AuthMiddleware, which panics on the first
+	// request. Refuse to register rather than serve them wide open.
+	if len(dc.ShareMiddleware) == 0 {
+		panic("DAGsController.Init: ShareMiddleware is unset; share-accessible routes would be published unauthenticated")
+	}
+
 	dc.Echo.POST("/dag", dc.createDAG, dc.AuthMiddleware)
 	dc.Echo.POST("/dag/:dag/update", dc.updateDAG, dc.ShareMiddleware...)
 	dc.Echo.GET("/dags", dc.getDAGs, dc.AuthMiddleware)

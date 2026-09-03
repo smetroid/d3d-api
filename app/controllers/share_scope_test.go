@@ -335,3 +335,174 @@ func TestShareScope_RejectedSurface(t *testing.T) {
 		})
 	}
 }
+
+// ─── Revocation ────────────────────────────────────────────────────────────
+//
+// Revoking a share writes to share_denylist but does not delete the shares
+// row, so GetShareByJti still resolves and the binding check still passes.
+// Before the denylist check moved into ShareResourceBinding, only dagWS
+// consulted it — leaving GET /dag/:dag, GET /dag/:dag/history and
+// POST /dag/:dag/update honoring a revoked link until the JWT's own exp,
+// up to ExpDays (7) later. These tests pin the chokepoint.
+
+func TestShareScope_RevokedShareRejected(t *testing.T) {
+	app := newShareScopeTestApp(t)
+	dagId := seedShareScopeDAG(t, app)
+
+	body := `{"diagram":"{\"nodes\":[],\"edges\":[]}"}`
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		role   string
+	}{
+		{"getDAG", http.MethodGet, "/dag/" + dagId, "", "view"},
+		{"getDAGHistory", http.MethodGet, "/dag/" + dagId + "/history", "", "view"},
+		{"updateDAG", http.MethodPost, "/dag/" + dagId + "/update", body, "edit"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tok := seedShareScopeShare(t, app, dagId, tc.role)
+
+			// Sanity: the link works before revocation, so a 403 after it
+			// can only be the revocation and not some unrelated rejection.
+			if code := doRequestBody(app, tc.method, tc.path, tok, tc.body); code == http.StatusForbidden {
+				t.Fatalf("share was already rejected before revocation; test proves nothing")
+			}
+
+			if err := app.db.RevokeShare(shareJti(t, tok)); err != nil {
+				t.Fatalf("revoke: %v", err)
+			}
+
+			if code := doRequestBody(app, tc.method, tc.path, tok, tc.body); code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403 (revoked share must not keep working)", code)
+			}
+		})
+	}
+}
+
+func TestShareScope_RevokedShareDoesNotAffectSessionToken(t *testing.T) {
+	app := newShareScopeTestApp(t)
+	dagId := seedShareScopeDAG(t, app)
+
+	tok := seedShareScopeShare(t, app, dagId, "view")
+	if err := app.db.RevokeShare(shareJti(t, tok)); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	// The denylist is keyed by jti, and a session token's jti is the
+	// username. Revoking a share must never be able to lock out a user
+	// whose username happens to collide with a share uuid, and more
+	// importantly the check must be skipped entirely for non-share tokens.
+	if code := doRequest(app, http.MethodGet, "/dag/"+dagId, shareScopeSessionToken(t)); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (session tokens are not subject to the share denylist)", code)
+	}
+}
+
+// shareJti pulls the jti claim back out of a minted share token so a test
+// can revoke exactly the share it was handed.
+func shareJti(t *testing.T, raw string) string {
+	t.Helper()
+	parsed, err := jwt.Parse(raw, func(*jwt.Token) (interface{}, error) {
+		return []byte(testSigningKey), nil
+	})
+	if err != nil {
+		t.Fatalf("parse share token: %v", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("claims are not MapClaims")
+	}
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		t.Fatalf("share token carries no jti")
+	}
+	return jti
+}
+
+// doRequestBody is doRequest with a JSON body, for the POST routes.
+func doRequestBody(app *shareScopeTestApp, method, path, raw, body string) int {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	}
+	if raw != "" {
+		req.Header.Set(echo.HeaderAuthorization, "Bearer "+raw)
+	}
+	rec := httptest.NewRecorder()
+	app.echo.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+// GET /menus carries no :dag parameter, so the binding check is skipped for
+// it. Revocation is not: a revoked link must reach nothing, which is why the
+// denylist check sits above the parameter-less early return rather than
+// below it with the binding logic.
+func TestShareScope_RevokedShareRejectedOnMenus(t *testing.T) {
+	app := newShareScopeTestApp(t)
+	dagId := seedShareScopeDAG(t, app)
+	tok := seedShareScopeShare(t, app, dagId, "view")
+
+	if code := doRequest(app, http.MethodGet, "/menus", tok); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 before revocation", code)
+	}
+
+	if err := app.db.RevokeShare(shareJti(t, tok)); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	if code := doRequest(app, http.MethodGet, "/menus", tok); code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (a revoked share must reach nothing, not even /menus)", code)
+	}
+}
+
+// A well-formed share JWT whose jti has no shares row is an authorization
+// failure (403), and must stay distinguishable from the database being
+// unreachable (500) — collapsing the two made a Postgres blip present as a
+// permanent denial.
+func TestShareScope_UnknownJtiIsForbiddenNotServerError(t *testing.T) {
+	app := newShareScopeTestApp(t)
+	dagId := seedShareScopeDAG(t, app)
+
+	raw, err := token.CreateToken(testSigningKey, jwt.MapClaims{
+		"jti":    uuid.New().String(), // valid signature, no shares row
+		"iss":    "d3d-share",
+		"dag_id": dagId,
+		"role":   "view",
+		"exp":    time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	if code := doRequest(app, http.MethodGet, "/dag/"+dagId, raw); code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a share token with no backing row", code)
+	}
+}
+
+// A controller constructed without ShareMiddleware used to register the five
+// share-accessible routes with zero middleware — variadic expansion of a nil
+// slice — publishing them unauthenticated. That is the one failure mode a
+// deny-list cannot catch, because no token is checked at all. Init must
+// refuse instead.
+func TestInitPanicsWhenShareMiddlewareUnset(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		init func()
+	}{
+		{"DAGsController", func() { (&DAGsController{Echo: echo.New()}).Init() }},
+		{"MenuController", func() { (&MenuController{Echo: echo.New()}).Init() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("Init() did not panic with ShareMiddleware unset; share routes would be served unauthenticated")
+				}
+			}()
+			tc.init()
+		})
+	}
+}

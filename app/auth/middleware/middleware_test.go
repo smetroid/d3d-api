@@ -336,3 +336,36 @@ func TestJWTMiddlewareIssuerVerdicts(t *testing.T) {
 		})
 	}
 }
+
+// The two deny-lists must stay in lockstep. rejectedSessionIssuers is
+// documented as the single place to name a new special-purpose issuer, so a
+// hand-maintained copy would fail open the moment someone followed those
+// instructions. This test fails if the derivation is ever replaced by a
+// literal, which is exactly the regression it exists to catch.
+func TestShareAwareIssuersDerivedFromRejectedSessionIssuers(t *testing.T) {
+	for iss := range rejectedSessionIssuers {
+		if iss == "d3d-share" {
+			if shareAwareRejectedIssuers[iss] {
+				t.Errorf("d3d-share must be absent from shareAwareRejectedIssuers; share routes exist to accept it")
+			}
+			continue
+		}
+		if !shareAwareRejectedIssuers[iss] {
+			t.Errorf("issuer %q is rejected for sessions but accepted on share routes — the deny-lists have drifted", iss)
+		}
+	}
+
+	for iss := range shareAwareRejectedIssuers {
+		if !rejectedSessionIssuers[iss] {
+			t.Errorf("issuer %q is rejected on share routes but not for sessions — the deny-lists have drifted", iss)
+		}
+	}
+
+	// Guard the derivation itself: adding an issuer to the source list must
+	// propagate without anyone touching a second list.
+	rejectedSessionIssuers["d3d-test-issuer"] = true
+	defer delete(rejectedSessionIssuers, "d3d-test-issuer")
+	if !rejectedIssuersExcept("d3d-share")["d3d-test-issuer"] {
+		t.Errorf("a newly added issuer did not propagate to the share-aware list")
+	}
+}

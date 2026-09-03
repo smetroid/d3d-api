@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/smetroid/d3d-api/app/auth/socialauth"
 	"github.com/smetroid/d3d-api/app/models"
 )
 
@@ -685,20 +687,20 @@ func TestPostgres_ListInboxShares(t *testing.T) {
 	aliceGroupIds := []string{grpID}
 
 	// Shares that MUST appear in alice's inbox.
-	wantUserFromBob  := makeShare("user",    []string{"alice"}, "bob",   false, time.Time{})
-	wantUserSelf     := makeShare("user",    []string{"alice"}, "alice", false, time.Time{}) // "Me" self-share
-	wantCompany      := makeShare("company", []string{coID},    "bob",   false, time.Time{})
-	wantGroup        := makeShare("group",   []string{grpID},   "bob",   false, time.Time{})
+	wantUserFromBob := makeShare("user", []string{"alice"}, "bob", false, time.Time{})
+	wantUserSelf := makeShare("user", []string{"alice"}, "alice", false, time.Time{}) // "Me" self-share
+	wantCompany := makeShare("company", []string{coID}, "bob", false, time.Time{})
+	wantGroup := makeShare("group", []string{grpID}, "bob", false, time.Time{})
 
 	// Shares that must NOT appear.
-	makeShare("public",  nil,               "bob",   false, time.Time{})           // public → catalog only
-	makeShare("user",    []string{"carol"},  "bob",   false, time.Time{})           // different user
-	makeShare("company", []string{"other"},  "bob",   false, time.Time{})           // different company
-	makeShare("group",   []string{"other"},  "bob",   false, time.Time{})           // different group
-	makeShare("company", []string{coID},    "alice", false, time.Time{})           // own company broadcast
-	makeShare("group",   []string{grpID},   "alice", false, time.Time{})           // own group broadcast
-	makeShare("public",  nil,               "bob",   true,  time.Time{})           // revoked
-	makeShare("public",  nil,               "bob",   false, now.Add(-time.Hour))   // expired
+	makeShare("public", nil, "bob", false, time.Time{})                // public → catalog only
+	makeShare("user", []string{"carol"}, "bob", false, time.Time{})    // different user
+	makeShare("company", []string{"other"}, "bob", false, time.Time{}) // different company
+	makeShare("group", []string{"other"}, "bob", false, time.Time{})   // different group
+	makeShare("company", []string{coID}, "alice", false, time.Time{})  // own company broadcast
+	makeShare("group", []string{grpID}, "alice", false, time.Time{})   // own group broadcast
+	makeShare("public", nil, "bob", true, time.Time{})                 // revoked
+	makeShare("public", nil, "bob", false, now.Add(-time.Hour))        // expired
 
 	shares, err := p.ListInboxShares("alice", aliceCompanyIds, aliceGroupIds)
 	if err != nil {
@@ -785,10 +787,10 @@ func TestPostgres_ListCatalogShares(t *testing.T) {
 	}
 
 	wantID := makeShare(true, "public", false, future, "Auth cluster")
-	makeShare(false, "public", false, future, "")       // catalog=false → excluded
-	makeShare(true, "public", true,  future, "")        // revoked → excluded
+	makeShare(false, "public", false, future, "")             // catalog=false → excluded
+	makeShare(true, "public", true, future, "")               // revoked → excluded
 	makeShare(true, "public", false, now.Add(-time.Hour), "") // expired → excluded
-	makeShare(true, "user",   false, future, "")        // non-public → excluded
+	makeShare(true, "user", false, future, "")                // non-public → excluded
 
 	rows, err := p.ListCatalogShares(10)
 	if err != nil {
@@ -831,5 +833,277 @@ func TestPostgres_GetElementShare_Title(t *testing.T) {
 	}
 	if got.Title != "My titled share" {
 		t.Errorf("expected title %q, got %q", "My titled share", got.Title)
+	}
+}
+
+func TestGetUserReturnsLocalProviderDefaults(t *testing.T) {
+	p := newTestPostgres(t)
+
+	u := models.User{
+		Id:           uuid.New().String(),
+		Username:     "alice",
+		PasswordHash: "hash",
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	if err := p.CreateUser(u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := p.GetUser("alice")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Provider != "local" {
+		t.Errorf("Provider = %q, want %q", got.Provider, "local")
+	}
+	if got.ProviderID != "" || got.Email != "" || got.DisplayName != "" {
+		t.Errorf("expected empty social fields, got %+v", got)
+	}
+}
+
+func TestUpsertSocialUserCreatesThenUpdates(t *testing.T) {
+	p := newTestPostgres(t)
+
+	profile := socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "583231",
+		Email:       "me@example.com",
+		DisplayName: "Enrique Carranco",
+		Username:    "smetroid",
+	}
+
+	created, err := p.UpsertSocialUser(profile)
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if created.Username != "github:smetroid" {
+		t.Errorf("Username = %q, want %q", created.Username, "github:smetroid")
+	}
+	if created.Id == "" {
+		t.Error("expected a generated id")
+	}
+
+	// A second login must return the same row with refreshed profile data.
+	profile.DisplayName = "E. Carranco"
+	profile.Email = "new@example.com"
+	updated, err := p.UpsertSocialUser(profile)
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if updated.Id != created.Id {
+		t.Errorf("id changed on re-login: %q -> %q", created.Id, updated.Id)
+	}
+	if updated.DisplayName != "E. Carranco" || updated.Email != "new@example.com" {
+		t.Errorf("profile not refreshed: %+v", updated)
+	}
+}
+
+func TestUpsertSocialUserDoesNotCollideWithLocalAccount(t *testing.T) {
+	p := newTestPostgres(t)
+
+	// A local account already owns the bare handle.
+	local := models.User{
+		Id:           uuid.New().String(),
+		Username:     "smetroid",
+		PasswordHash: "hash",
+		CreatedAt:    time.Now().UTC().Truncate(time.Second),
+	}
+	if err := p.CreateUser(local); err != nil {
+		t.Fatalf("create local: %v", err)
+	}
+
+	social, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "583231",
+		Username:   "smetroid",
+	})
+	if err != nil {
+		t.Fatalf("upsert must not collide with the local account: %v", err)
+	}
+	if social.Id == local.Id {
+		t.Fatal("social login must never adopt an existing local account")
+	}
+}
+
+// I5 regression: a GitHub user who renames must not permanently 500-lock a
+// later signer who claims their now-available old handle. UpsertSocialUser's
+// DO UPDATE must keep the stored username in sync with the provider, so the
+// old `provider:handle` is freed as soon as the renamed user logs back in.
+func TestUpsertSocialUserRenameFreesUsernameForReuse(t *testing.T) {
+	p := newTestPostgres(t)
+
+	original, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+	if original.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q", original.Username, "github:alice")
+	}
+
+	// The original owner renames on GitHub and logs back in: same
+	// provider_id, new handle. Without the fix, username is never updated by
+	// the ON CONFLICT DO UPDATE, so "github:alice" stays permanently claimed.
+	renamed, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("rename upsert: %v", err)
+	}
+	if renamed.Id != original.Id {
+		t.Fatalf("rename must update the existing row, got a new id: %q -> %q", original.Id, renamed.Id)
+	}
+	if renamed.Username != "github:bob" {
+		t.Fatalf("Username = %q, want %q after rename", renamed.Username, "github:bob")
+	}
+
+	// A different person now claims the freed-up "alice" handle. This is a
+	// genuinely new account (different provider_id) and must succeed, not
+	// collide with the stale username the original owner left behind.
+	newClaimant, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("reuse of freed username must succeed, got: %v", err)
+	}
+	if newClaimant.Id == renamed.Id {
+		t.Fatal("the new claimant must be a distinct account from the renamed original")
+	}
+	if newClaimant.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q", newClaimant.Username, "github:alice")
+	}
+}
+
+// I5 regression: when the username collision is genuine — a different
+// provider_id whose desired username is still actively held by another row
+// — UpsertSocialUser must return a distinct, recognizable error rather than
+// letting the underlying unique-constraint violation surface as an opaque
+// failure the caller can't act on.
+func TestUpsertSocialUserGenuineUsernameCollisionReturnsDistinctError(t *testing.T) {
+	p := newTestPostgres(t)
+
+	holder, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "alice",
+	})
+	if err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+
+	_, err = p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "alice",
+	})
+	if !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v, want ErrUsernameTaken", err)
+	}
+
+	// The collision must not have mutated the existing holder's row.
+	still, getErr := p.GetUserByProvider("github", "1")
+	if getErr != nil {
+		t.Fatalf("get holder: %v", getErr)
+	}
+	if still.Id != holder.Id || still.Username != "github:alice" {
+		t.Fatalf("holder row changed after failed collision: %+v", still)
+	}
+}
+
+// Regression: an existing social user (A) who renames into a handle already
+// held by a different existing social user (B) must not be permanently
+// locked out. Before this fix, the update-branch DO UPDATE would hit the
+// same users_username_key violation as a genuine new-account collision and
+// return ErrUsernameTaken, 409-ing a user who previously logged in fine.
+// The fix must let A's login succeed, keeping A's old (still unique)
+// username while still refreshing the rest of A's profile.
+func TestUpsertSocialUserRenameIntoExistingUsernameDoesNotLockOutRenamer(t *testing.T) {
+	p := newTestPostgres(t)
+
+	userA, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "1",
+		Username:    "alice",
+		Email:       "alice@example.com",
+		DisplayName: "Alice",
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+
+	userB, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+
+	// A renames to "bob" on GitHub, which B already holds. This must not
+	// fail, since A already has a working account and this is not a fresh
+	// signup racing for a handle.
+	renamed, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "1",
+		Username:    "bob",
+		Email:       "alice-new@example.com",
+		DisplayName: "Alice B.",
+	})
+	if err != nil {
+		t.Fatalf("renamer's login must not be locked out, got: %v", err)
+	}
+	if renamed.Id != userA.Id {
+		t.Fatalf("id changed on renamer login: %q -> %q", userA.Id, renamed.Id)
+	}
+	// A keeps the old, still-unique username rather than colliding with B.
+	if renamed.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q (kept, since github:bob is taken)", renamed.Username, "github:alice")
+	}
+	// The rest of A's profile still refreshes.
+	if renamed.Email != "alice-new@example.com" || renamed.DisplayName != "Alice B." {
+		t.Fatalf("profile not refreshed for renamer: %+v", renamed)
+	}
+
+	// A can log in again afterward without error, proving the account still
+	// works and wasn't left in a broken state.
+	again, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("second login for renamer must also succeed: %v", err)
+	}
+	if again.Id != userA.Id || again.Username != "github:alice" {
+		t.Fatalf("unexpected state on repeat login: %+v", again)
+	}
+
+	// B's account must be completely untouched.
+	stillB, err := p.GetUserByProvider("github", "2")
+	if err != nil {
+		t.Fatalf("get B: %v", err)
+	}
+	if stillB.Id != userB.Id || stillB.Username != "github:bob" {
+		t.Fatalf("B's row changed after A's rename collision: %+v", stillB)
+	}
+}
+
+func TestGetUserByProviderMissingReturnsZero(t *testing.T) {
+	p := newTestPostgres(t)
+
+	got, err := p.GetUserByProvider("github", "nobody")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Id != "" {
+		t.Errorf("expected zero User, got %+v", got)
 	}
 }

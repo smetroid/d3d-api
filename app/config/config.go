@@ -2,6 +2,8 @@ package config
 
 import (
 	"log"
+	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 	"github.com/smetroid/d3d-api/app/auth/ldap"
@@ -19,6 +21,17 @@ type SamusConfig struct {
 	// PostgreSQL is an alias section ([postgresql]) accepted for configs
 	// that spell out discrete connection fields; see mergePostgresConfig.
 	PostgreSQL postgres.Postgres `toml:"postgresql"`
+
+	Google SocialProvider `toml:"google"`
+	GitHub SocialProvider `toml:"github"`
+}
+
+// SocialProvider holds one OAuth application's credentials. Empty ClientID
+// means the provider is not configured and its routes return 501.
+type SocialProvider struct {
+	ClientID     string `toml:"client_id"`
+	ClientSecret string `toml:"client_secret"`
+	RedirectURL  string `toml:"redirect_url"`
 }
 
 type samus struct {
@@ -34,18 +47,57 @@ type samus struct {
 	TLSKey          string `toml:"tls_key"`
 	TLSAutoEnabled  bool   `toml:"tls_auto_enabled"`
 	TLSAutoHosts    string `toml:"tls_auto_hosts"`
+
+	// FrontendOrigin is the single allowed CORS origin and the base for OAuth
+	// redirect URLs. CookieSecure is false only for plain-HTTP local dev.
+	FrontendOrigin string `toml:"frontend_origin"`
+	CookieSecure   bool   `toml:"cookie_secure"`
 }
 
 func BuildConfig(configFile string) (config SamusConfig) {
+	// A security flag must fail closed: default to secure cookies *before*
+	// decoding, so a TOML file that omits `cookie_secure` entirely still
+	// ships Secure cookies, while an explicit `cookie_secure = false` (dev
+	// only) still overrides it during the decode below.
+	config.Samus.CookieSecure = true
+
 	_, err := toml.DecodeFile(configFile, &config)
 
 	if err != nil {
 		log.Fatal("config file error: " + err.Error())
 	}
 
+	applyEnvOverrides(&config)
 	mergePostgresConfig(&config)
 	setDefaultConfigs(&config)
 	return
+}
+
+// applyEnvOverrides lets the deployment supply the values that differ per
+// environment without committing them. TOML stays the default; an environment
+// variable wins only when set AND non-empty, so a host that exports a name
+// blank cannot wipe working configuration.
+func applyEnvOverrides(cfg *SamusConfig) {
+	overrideString(&cfg.Google.ClientID, "D3D_GOOGLE_CLIENT_ID")
+	overrideString(&cfg.Google.ClientSecret, "D3D_GOOGLE_CLIENT_SECRET")
+	overrideString(&cfg.Google.RedirectURL, "D3D_GOOGLE_REDIRECT_URL")
+	overrideString(&cfg.GitHub.ClientID, "D3D_GITHUB_CLIENT_ID")
+	overrideString(&cfg.GitHub.ClientSecret, "D3D_GITHUB_CLIENT_SECRET")
+	overrideString(&cfg.GitHub.RedirectURL, "D3D_GITHUB_REDIRECT_URL")
+	overrideString(&cfg.Samus.FrontendOrigin, "D3D_FRONTEND_ORIGIN")
+	overrideString(&cfg.Samus.SigningKey, "D3D_SIGNING_KEY")
+
+	if v := os.Getenv("D3D_COOKIE_SECURE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Samus.CookieSecure = b
+		}
+	}
+}
+
+func overrideString(target *string, envName string) {
+	if v := os.Getenv(envName); v != "" {
+		*target = v
+	}
 }
 
 // mergePostgresConfig lets a [postgresql] section stand in for [postgres].

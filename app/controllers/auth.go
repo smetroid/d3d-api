@@ -11,6 +11,8 @@ import (
 type AuthController struct {
 	Echo         *echo.Echo
 	AuthProvider auth.AuthProvider
+	SigningKey   string
+	CookieSecure bool
 }
 
 func (ac *AuthController) Init() {
@@ -34,13 +36,11 @@ func (ac *AuthController) LoginHandler(ctx echo.Context) error {
 
 	authToken := models.AuthToken{Token: token}
 
-	//	cookie := new(http.Cookie)
-	//	cookie.Name = "jwt_token"
-	//	cookie.Value = authToken.String()
-	//	log.Println(authToken.String())
-	//	cookie.Expires = time.Now().Add(24 * time.Hour)
-	//	ctx.SetCookie(cookie)
-	//	log.Println(cookie)
+	// Local logins get the same httpOnly cookie as social logins, so the
+	// frontend has one session mechanism rather than two.
+	SetSessionCookie(ctx, token, ac.CookieSecure)
 
+	// The token also stays in the body during the migration; the frontend
+	// stops reading it in the d3dweb work but other callers may not have.
 	return ctx.JSON(http.StatusOK, authToken)
 }

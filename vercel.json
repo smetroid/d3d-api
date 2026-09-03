@@ -11,6 +11,7 @@
   ],
   "env": {
     "AUTH_PROVIDER": "localauth",
+    "FRONTEND_ORIGIN": "",
     "LOG_DAG_REQUESTS": "true",
     "LOG_EDGE_REQUESTS": "true",
     "LOG_NODE_REQUESTS": "true",

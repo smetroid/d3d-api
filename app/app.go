@@ -24,6 +24,18 @@ func (r *RenderWrapper) Render(w io.Writer, name string, data interface{}, c ech
 }
 
 func BuildApp(config config.SamusConfig) (e *echo.Echo) {
+	// FrontendOrigin is the single allowed CORS origin. A blank value still
+	// produces a length-1 AllowOrigins slice ([""]) below, so middleware.go's
+	// "fall back to default" never fires and the origin matches nothing:
+	// every response gets an empty Access-Control-Allow-Origin and the
+	// frontend silently breaks, with no server-side diagnostic. Under the
+	// old proxy topology a missing value was harmless; under the direct
+	// topology it is total failure, so fail loudly at boot instead —
+	// mirroring the SigningKey guard in BuildAuthProvider below.
+	if config.Samus.FrontendOrigin == "" {
+		log.Fatal("Shutting down, frontend origin must be provided.")
+	}
+
 	err := config.Postgres.Init()
 	if err != nil {
 		log.Fatal(err)
@@ -44,24 +56,56 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 
 	// Middleware
 	//e.Use(middleware.Recover())
+	// A single explicit origin, not "*": credentialed requests are rejected by
+	// browsers when the allowed origin is a wildcard.
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		//AllowOrigins: []string{"http://192.168.1.4:3000", "http://192.168.1.4:8081"},
-		AllowOrigins: []string{"*"},
-		//AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
-		AllowHeaders: []string{"*"},
+		AllowOrigins:     []string{config.Samus.FrontendOrigin},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowCredentials: true,
 	}))
 
 	authProvider := BuildAuthProvider(config)
 	authMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
 		SigningKey:  []byte(config.Samus.SigningKey),
-		TokenLookup: "header:Authorization,query:api-key,query:token",
+		TokenLookup: "header:Authorization,query:api-key,query:token,cookie:jwt_token",
 	})
+
+	// shareRouteMiddleware backs the small, explicit set of share-
+	// accessible routes (GET /dag/:dag, POST /dag/:dag/update,
+	// GET /dag/:dag/history, GET /dag/:dag/ws, GET /menus). It replaces
+	// authMiddleware — never combines with it — on those routes: layer 1
+	// (ShareJWTWithConfig) accepts both d3d-share and ordinary session
+	// tokens, and layer 2 (ShareResourceBinding) binds a d3d-share token to
+	// the requested :dag. Every other auth-gated route keeps plain
+	// authMiddleware, which now rejects d3d-share outright, so a route
+	// added later is closed to share tokens by default unless it
+	// deliberately opts into this slice instead.
+	shareRouteMiddleware := []echo.MiddlewareFunc{
+		middleware.ShareJWTWithConfig(middleware.JWTConfig{
+			SigningKey:  []byte(config.Samus.SigningKey),
+			TokenLookup: "header:Authorization,query:api-key,query:token,cookie:jwt_token",
+		}),
+		controllers.ShareResourceBinding(db),
+	}
 
 	authController := controllers.AuthController{
 		Echo:         e,
 		AuthProvider: authProvider,
+		SigningKey:   config.Samus.SigningKey,
+		CookieSecure: config.Samus.CookieSecure,
 	}
 	authController.Init()
+
+	socialAuthController := controllers.SocialAuthController{
+		Echo:           e,
+		DB:             db,
+		SigningKey:     config.Samus.SigningKey,
+		CookieSecure:   config.Samus.CookieSecure,
+		Google:         config.Google,
+		GitHub:         config.GitHub,
+		AuthMiddleware: authMiddleware,
+	}
+	socialAuthController.Init()
 
 	dagService := services.DAGService{
 		DB: db,
@@ -82,12 +126,13 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 	hub := collab.NewHub()
 
 	dagController := controllers.DAGsController{
-		Echo:           e,
-		DAGService:     dagService,
-		Hub:            hub,
-		DB:             db,
-		AuthMiddleware: authMiddleware,
-		LogDAGRequests: config.Samus.LogDAGRequests,
+		Echo:            e,
+		DAGService:      dagService,
+		Hub:             hub,
+		DB:              db,
+		AuthMiddleware:  authMiddleware,
+		ShareMiddleware: shareRouteMiddleware,
+		LogDAGRequests:  config.Samus.LogDAGRequests,
 	}
 
 	edgeController := controllers.EdgeController{
@@ -108,6 +153,7 @@ func BuildApp(config config.SamusConfig) (e *echo.Echo) {
 		Echo:            e,
 		MenuService:     menuService,
 		AuthMiddleware:  authMiddleware,
+		ShareMiddleware: shareRouteMiddleware,
 		LogMenuRequests: config.Samus.LogMenuRequests,
 	}
 

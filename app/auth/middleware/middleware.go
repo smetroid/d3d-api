@@ -43,6 +43,87 @@ type (
 	jwtExtractor func(echo.Context) (string, error)
 )
 
+// rejectedSessionIssuers lists token issuers that must never be accepted as
+// a session credential by JWTWithConfig, even though they are signed with
+// the same session signing key and therefore pass signature verification.
+//
+// This is a deny-list, not an allow-list, deliberately. The issuer on an
+// ordinary session token is the configured auth_provider value
+// (token.CreateExpiringToken's `backend` parameter — "localauth", "ldap",
+// "oauth", "google", "github", ...), which is open-ended: a deployment can
+// configure a provider name we've never seen. An allow-list would reject
+// legitimate sessions from any provider not in it. A deny-list only needs
+// to name the small, fixed set of issuers minted for a purpose other than
+// "act as a session" — e.g. the publicly-handed-out d3d-element-share
+// catalog token and the d3d-social-state OAuth CSRF token — so it stays
+// safe as new session providers are added. Do not convert this to an
+// allow-list; that would break unanticipated auth_provider configurations.
+//
+// d3d-share is included here too, and this is a deliberate route-scoping
+// decision, not an oversight: share tokens are handed to untrusted external
+// recipients and must reach only a small, explicit set of share-appropriate
+// routes (GET /dag/:dag, POST /dag/:dag/update, GET /dag/:dag/history,
+// GET /dag/:dag/ws, GET /menus), each bound to the specific diagram the
+// share was minted for. JWTWithConfig backs the general AuthMiddleware used
+// by ~40 routes with zero role checks, so it must fail closed for d3d-share:
+// any route wired with plain AuthMiddleware rejects share tokens by
+// default, even ones added after this comment was written. Routes that
+// need to accept a share token opt in explicitly via ShareJWTWithConfig
+// below, paired with app/controllers/share_scope.go's ShareResourceBinding
+// middleware, which enforces that the token's bound dag_id (shares.dag_id,
+// looked up via Postgres.GetShareByJti) matches the requested :dag. Do not
+// remove "d3d-share" from this map; that would reopen every auth-gated
+// route with zero role checks to any share recipient.
+var rejectedSessionIssuers = map[string]bool{
+	// d3d-element-share: minted by /catalog (public, no auth) and by
+	// element share creation. Consumed by its own handler at
+	// element_shares.go's exchangeElementShare, which checks `iss` itself.
+	// Some of these tokens have no `exp` at all (non-expiring shares), so
+	// without this check a publicly obtainable, potentially-never-expiring
+	// token would be a valid session credential on every protected route.
+	"d3d-element-share": true,
+	// d3d-social-state: the OAuth CSRF state parameter, minted by
+	// socialauth.GenerateState and consumed by socialauth.ValidateState.
+	// Already key-separated (signed with a derived key), but rejected here
+	// too as belt-and-braces in case that ever changes.
+	"d3d-social-state": true,
+	// d3d-share: see the doc comment above. Rejected here in the general
+	// middleware; accepted only via ShareJWTWithConfig on share-accessible
+	// routes.
+	"d3d-share": true,
+}
+
+// shareAwareRejectedIssuers is rejectedSessionIssuers minus "d3d-share".
+// ShareJWTWithConfig uses this list instead of rejectedSessionIssuers: it
+// backs the small set of share-accessible routes that must accept d3d-share
+// tokens (in addition to ordinary session tokens) while still denying the
+// other special-purpose issuers (d3d-element-share, d3d-social-state) that
+// must never be treated as a session credential anywhere.
+//
+// It is DERIVED from rejectedSessionIssuers rather than written out
+// literally, and that is the whole point. rejectedSessionIssuers is
+// documented above as the place to name any new special-purpose issuer. A
+// hand-copied second list silently fails open: whoever adds "d3d-embed"
+// there per those instructions would have no way to know a duplicate
+// existed, and their new token would be accepted as a session credential on
+// GET /dag/:dag, POST /dag/:dag/update, /history, /ws and /menus. Deriving
+// it makes that drift impossible.
+var shareAwareRejectedIssuers = rejectedIssuersExcept("d3d-share")
+
+// rejectedIssuersExcept copies rejectedSessionIssuers minus the named
+// issuers. Go resolves package-level initialisation by dependency, so this
+// runs after rejectedSessionIssuers is populated.
+func rejectedIssuersExcept(allowed ...string) map[string]bool {
+	out := make(map[string]bool, len(rejectedSessionIssuers))
+	for iss := range rejectedSessionIssuers {
+		out[iss] = true
+	}
+	for _, iss := range allowed {
+		delete(out, iss)
+	}
+	return out
+}
+
 type (
 	// CORSConfig defines the config for CORS middleware.
 	CORSConfig struct {
@@ -222,6 +303,29 @@ func JWT(key []byte) echo.MiddlewareFunc {
 // JWTWithConfig returns a JWT auth middleware from config.
 // See: `JWT()`.
 func JWTWithConfig(config JWTConfig) echo.MiddlewareFunc {
+	return jwtMiddlewareWithRejectedIssuers(config, rejectedSessionIssuers)
+}
+
+// ShareJWTWithConfig is JWTWithConfig's counterpart for the small set of
+// share-accessible routes (see the "d3d-share" entry in
+// rejectedSessionIssuers for the full rationale). It performs identical
+// signature/expiry verification but accepts the "d3d-share" issuer instead
+// of rejecting it, while still denying every other special-purpose issuer
+// (d3d-element-share, d3d-social-state).
+//
+// Accepting the issuer is only layer 1 (route scoping) of the share design.
+// This alone does NOT bind a share token to the diagram it was minted for
+// — callers MUST also chain app/controllers/share_scope.go's
+// ShareResourceBinding middleware after this one on every route that takes
+// a :dag parameter, or a share recipient can read/write any diagram by id.
+func ShareJWTWithConfig(config JWTConfig) echo.MiddlewareFunc {
+	return jwtMiddlewareWithRejectedIssuers(config, shareAwareRejectedIssuers)
+}
+
+// jwtMiddlewareWithRejectedIssuers holds the verification logic shared by
+// JWTWithConfig and ShareJWTWithConfig; they differ only in which issuers
+// are denied.
+func jwtMiddlewareWithRejectedIssuers(config JWTConfig, rejectedIssuers map[string]bool) echo.MiddlewareFunc {
 	// Defaults
 	if config.SigningKey == nil {
 		panic("jwt middleware requires signing key")
@@ -255,6 +359,22 @@ func JWTWithConfig(config JWTConfig) echo.MiddlewareFunc {
 			})
 
 			if err == nil && token.Valid {
+				// The rejectedIssuers check below is a security control,
+				// not a convenience one, so it must fail closed: if the
+				// claims can't be read as jwt.MapClaims, we cannot verify
+				// `iss` isn't a denied issuer, so reject rather than
+				// silently letting the token through. jwt.Parse always
+				// yields jwt.MapClaims today (it calls ParseWithClaims
+				// with a jwt.MapClaims{} internally), so this branch is
+				// not reachable via this code path currently, but the
+				// default on the failure branch must still be deny.
+				claims, ok := token.Claims.(jwt.MapClaims)
+				if !ok {
+					return echo.ErrUnauthorized
+				}
+				if iss, _ := claims["iss"].(string); rejectedIssuers[iss] {
+					return echo.ErrUnauthorized
+				}
 				// Store user information from token into context.
 				c.Set(config.ContextKey, token)
 				return next(c)

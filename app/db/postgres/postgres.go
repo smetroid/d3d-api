@@ -881,6 +881,21 @@ func (p *Postgres) GetUserByProvider(provider, providerID string) (models.User, 
 // silently hand the renaming user's old identity to a stranger without their
 // knowledge, which is worse than asking them to sign in again after the
 // rightful claim settles.
+//
+// A username collision can now happen on the DO UPDATE branch too: user A
+// (provider_id 1, "github:alice") renames to "bob" on GitHub while
+// "github:bob" is already held by an unrelated user B (provider_id 2). A's
+// next login upserts username = "github:bob" for A's *existing* row and hits
+// the same users_username_key violation. Unlike the insert case, A already
+// has a working account — returning ErrUsernameTaken here would permanently
+// lock A out over a rename A doesn't control, which is worse than just
+// leaving A's stored username stale. We can't tell from the unique-violation
+// error alone which branch (INSERT vs. DO UPDATE) produced it, so on that
+// error we re-check whether a row for this (provider, provider_id) already
+// existed: if it did, this was the update branch, and we retry updating only
+// email/display_name, keeping the old (still valid, still unique) username.
+// If it didn't, this was a genuine new-account insert colliding with someone
+// else's handle, and ErrUsernameTaken is correct as before.
 func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (models.User, error) {
 	var u models.User
 	err := p.pool.QueryRow(context.Background(), `
@@ -899,11 +914,41 @@ func (p *Postgres) UpsertSocialUser(profile socialauth.SocialUserProfile) (model
 	).Scan(
 		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
 		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
+	if err == nil {
+		return u, nil
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgUniqueViolation || pgErr.ConstraintName != "users_username_key" {
+		return models.User{}, err
+	}
+
+	// The failed statement above rolled back entirely (it's a single,
+	// implicitly-transacted statement), so this lookup sees the
+	// pre-attempt state: if a row for this provider identity already
+	// existed, the collision came from the DO UPDATE branch.
+	existing, lookupErr := p.GetUserByProvider(profile.Provider, profile.ProviderID)
+	if lookupErr != nil {
+		return models.User{}, lookupErr
+	}
+	if existing.Id == "" {
+		// No pre-existing row: this was a genuine new-account insert
+		// colliding with someone else's handle.
+		return models.User{}, ErrUsernameTaken
+	}
+
+	// Update branch: keep the existing (still unique) username and only
+	// refresh the mutable profile fields, so the renaming user isn't
+	// locked out of an account they already have.
+	err = p.pool.QueryRow(context.Background(), `
+		UPDATE users SET email = $1, display_name = $2
+		WHERE provider = $3 AND provider_id = $4
+		RETURNING `+socialUserColumns,
+		profile.Email, profile.DisplayName, profile.Provider, profile.ProviderID,
+	).Scan(
+		&u.Id, &u.Username, &u.PasswordHash, &u.CreatedAt,
+		&u.Provider, &u.ProviderID, &u.Email, &u.DisplayName)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "users_username_key" {
-			return models.User{}, ErrUsernameTaken
-		}
 		return models.User{}, err
 	}
 	return u, nil

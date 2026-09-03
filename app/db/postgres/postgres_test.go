@@ -1017,6 +1017,85 @@ func TestUpsertSocialUserGenuineUsernameCollisionReturnsDistinctError(t *testing
 	}
 }
 
+// Regression: an existing social user (A) who renames into a handle already
+// held by a different existing social user (B) must not be permanently
+// locked out. Before this fix, the update-branch DO UPDATE would hit the
+// same users_username_key violation as a genuine new-account collision and
+// return ErrUsernameTaken, 409-ing a user who previously logged in fine.
+// The fix must let A's login succeed, keeping A's old (still unique)
+// username while still refreshing the rest of A's profile.
+func TestUpsertSocialUserRenameIntoExistingUsernameDoesNotLockOutRenamer(t *testing.T) {
+	p := newTestPostgres(t)
+
+	userA, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "1",
+		Username:    "alice",
+		Email:       "alice@example.com",
+		DisplayName: "Alice",
+	})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+
+	userB, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "2",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+
+	// A renames to "bob" on GitHub, which B already holds. This must not
+	// fail, since A already has a working account and this is not a fresh
+	// signup racing for a handle.
+	renamed, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:    "github",
+		ProviderID:  "1",
+		Username:    "bob",
+		Email:       "alice-new@example.com",
+		DisplayName: "Alice B.",
+	})
+	if err != nil {
+		t.Fatalf("renamer's login must not be locked out, got: %v", err)
+	}
+	if renamed.Id != userA.Id {
+		t.Fatalf("id changed on renamer login: %q -> %q", userA.Id, renamed.Id)
+	}
+	// A keeps the old, still-unique username rather than colliding with B.
+	if renamed.Username != "github:alice" {
+		t.Fatalf("Username = %q, want %q (kept, since github:bob is taken)", renamed.Username, "github:alice")
+	}
+	// The rest of A's profile still refreshes.
+	if renamed.Email != "alice-new@example.com" || renamed.DisplayName != "Alice B." {
+		t.Fatalf("profile not refreshed for renamer: %+v", renamed)
+	}
+
+	// A can log in again afterward without error, proving the account still
+	// works and wasn't left in a broken state.
+	again, err := p.UpsertSocialUser(socialauth.SocialUserProfile{
+		Provider:   "github",
+		ProviderID: "1",
+		Username:   "bob",
+	})
+	if err != nil {
+		t.Fatalf("second login for renamer must also succeed: %v", err)
+	}
+	if again.Id != userA.Id || again.Username != "github:alice" {
+		t.Fatalf("unexpected state on repeat login: %+v", again)
+	}
+
+	// B's account must be completely untouched.
+	stillB, err := p.GetUserByProvider("github", "2")
+	if err != nil {
+		t.Fatalf("get B: %v", err)
+	}
+	if stillB.Id != userB.Id || stillB.Username != "github:bob" {
+		t.Fatalf("B's row changed after A's rename collision: %+v", stillB)
+	}
+}
+
 func TestGetUserByProviderMissingReturnsZero(t *testing.T) {
 	p := newTestPostgres(t)
 
